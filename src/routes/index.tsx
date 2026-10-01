@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ReleaseWorkspace } from "@/components/release-workspace";
 import { OperationsWorkspace } from "@/components/operations-workspace";
-import { DevControlWorkspace } from "@/components/dev-control-workspace";
 import { McpControlsWorkspace } from "@/components/mcp-controls-workspace";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -22,7 +21,7 @@ import {
 
 export const Route = createFileRoute("/")({ component: Index });
 
-type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "dev-control" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
+type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
 type ReleaseType = "base" | "engine";
 
 const EMPTY = { releases: [], channels: [] };
@@ -383,7 +382,6 @@ function Index() {
               onInspect={() => inspect("engine")} onStart={() => start("engine")} run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
-            {tab === "dev-control" && <DevControlWorkspace session={session} />}
             {tab === "mcp-controls" && <McpControlsWorkspace session={session} />}
             {tab === "repositories" && <RepositoriesPage data={data} session={session} onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")} />}
             {tab === "channels" && <ChannelsPage channels={availableChannels} data={data} session={session} />}
@@ -465,7 +463,6 @@ const NAV_GROUPS = [
     ["operations","Operations","Secondary service operations",Terminal],
   ]},
   {label:"Networking",items:[
-    ["dev-control","Dev Control","API settings & target access",Globe2],
     ["mcp-controls","MCP Controls","Private ChatGPT / Codex control",KeyRound],
   ]},
   {label:"Monitor",items:[
