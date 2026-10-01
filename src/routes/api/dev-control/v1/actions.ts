@@ -1,5 +1,0 @@
-import {createFileRoute} from "@tanstack/react-router";
-import {requireDevControlOwner,runDevControlAction,type DevControlAction,type DevControlTarget} from "@/lib/dev-control.server";
-const ACTIONS=new Set(["prepare_latest_source","quick_deploy","production_deploy","redeploy"]);
-const TARGETS=new Set(["license_manager","billing_store"]);
-export const Route=createFileRoute("/api/dev-control/v1/actions")({server:{handlers:{POST:async({request})=>{try{const actor=requireDevControlOwner(request);const body=await request.json().catch(()=>({}));const action=String(body.action||"");const target=String(body.target||"");if(!ACTIONS.has(action)||!TARGETS.has(target))return Response.json({ok:false,error:"UNSUPPORTED_ACTION"},{status:400});return Response.json(await runDevControlAction(actor,{action:action as DevControlAction,target:target as DevControlTarget,confirm:body.confirm===true}),{status:202})}catch(error){const message=error instanceof Error?error.message:"Request failed";const auth=/Owner|UNAUTHORIZED|session/i.test(message);return Response.json({ok:false,error:auth?"UNAUTHORIZED":message},{status:auth?401:409})}}}}});
