@@ -1,3 +1,0 @@
-import {createFileRoute} from "@tanstack/react-router";
-import {getDevControlJobs,requireDevControlOwner} from "@/lib/dev-control.server";
-export const Route=createFileRoute("/api/dev-control/v1/jobs")({server:{handlers:{GET:async({request})=>{try{requireDevControlOwner(request);const url=new URL(request.url);const limit=Number(url.searchParams.get("limit")||25);return Response.json({ok:true,...await getDevControlJobs(limit)},{headers:{"cache-control":"no-store"}})}catch(error){const message=error instanceof Error?error.message:"Request failed";const auth=/Owner|UNAUTHORIZED|session/i.test(message);return Response.json({ok:false,error:auth?"UNAUTHORIZED":message},{status:auth?401:500})}}}}});
