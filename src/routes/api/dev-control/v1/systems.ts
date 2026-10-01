@@ -1,3 +1,0 @@
-import {createFileRoute} from "@tanstack/react-router";
-import {getDevControlSystems,requireDevControlOwner} from "@/lib/dev-control.server";
-export const Route=createFileRoute("/api/dev-control/v1/systems")({server:{handlers:{GET:async({request})=>{try{requireDevControlOwner(request);return Response.json({ok:true,...await getDevControlSystems()},{headers:{"cache-control":"no-store"}})}catch(error){const message=error instanceof Error?error.message:"Request failed";return Response.json({ok:false,error:/Owner|UNAUTHORIZED|session/i.test(message)?"UNAUTHORIZED":message},{status:/Owner|UNAUTHORIZED|session/i.test(message)?401:500})}}}}});
