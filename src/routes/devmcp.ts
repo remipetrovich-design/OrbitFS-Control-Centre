@@ -101,7 +101,7 @@ async function handlePost(request:Request){
 
 export const Route=createFileRoute("/devmcp")({server:{handlers:{
  OPTIONS:async()=>new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"POST,GET,OPTIONS","access-control-allow-headers":"authorization,content-type,mcp-protocol-version","access-control-max-age":"86400"}}),
- GET:async({request})=>originAllowed(request)?Response.json({ok:true,service:"orbitfs-dev-mcp",endpoint:"/devmcp",transport:"streamable-http",authentication:"bearer",ownerOnly:true},{headers:{"cache-control":"no-store"}}):Response.json({ok:false,error:"ORIGIN_NOT_ALLOWED"},{status:403}),
+ GET:async({request})=>!originAllowed(request)?Response.json({ok:false,error:"ORIGIN_NOT_ALLOWED"},{status:403}):!authorized(request)?Response.json({ok:false,error:"UNAUTHORIZED"},{status:401,headers:{"www-authenticate":"Bearer","cache-control":"no-store"}}):Response.json({ok:true,service:"orbitfs-dev-mcp",endpoint:"/devmcp",transport:"streamable-http",authentication:"bearer",ownerOnly:true},{headers:{"cache-control":"no-store"}}),
  POST:async({request})=>handlePost(request),
  DELETE:async()=>new Response(null,{status:204}),
 }}});
