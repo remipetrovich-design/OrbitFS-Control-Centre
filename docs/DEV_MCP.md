@@ -1,99 +1,122 @@
-# OrbitFS Dev MCP
+# Private Dev MCP
 
-Private developer MCP for OrbitFS Dev Control.
+Owner-only ChatGPT/Codex interface for the existing Dev Panel.
 
 ## Endpoint
 
 `https://dev.incendiarynetworks.cc/devmcp`
 
-The endpoint is hosted by Dev Panel and is separate from the normal Dev Control REST API.
+There is no separate Dev Control REST API. The MCP calls Dev Panel server logic directly and uses the existing authoritative systems.
 
-## Ownership
+## Architecture
 
-This MCP is for the OrbitFS owner/developer only.
+```
+ChatGPT / Codex
+       |
+       v
+Private Dev MCP (/devmcp)
+       |
+       v
+Dev Panel server logic
+  |-- GitHub: V1-vercel-base
+  |-- GitHub: V1-vercel-engine
+  |-- Custom License Manager
+  `-- V2 Billing Store when customer/account/deployer context is needed
+```
 
-Primary systems:
+Custom License Manager remains authoritative for licences, runtime authority, releases, update eligibility and deployer/updater authorization.
 
-1. `V1-vercel-base`
-   - Base release source
-   - `base-release` preparation
-   - Base release operations
+V2 Billing Store is used for customer/email resolution, customer-to-licence bindings, installation context and customer deployer execution where required. Dev Panel does not copy customer or licence authority into its own database.
 
-2. `V1-vercel-engine`
-   - Engine/updater source
-   - `UPDATE_RELEASE` preparation
-   - Update release operations
+## ChatGPT UI
 
-Secondary systems:
+The `show_dev` tool returns `ui://dev-panel/v1.html` as an MCP App resource.
 
-3. Custom License Manager
-4. V2 Billing Store
+The UI supports inline, fullscreen and PiP display modes. UI buttons call the same MCP tools that are available through normal chat commands. Fullscreen includes prepare, service deployment, customer licence, customer update, release and live-job controls; PiP follows an active workflow.
 
-## Current MCP foundation
+Typical use:
 
-Current tools:
+- `@Dev show dev`
+- `@Dev prepare both`
+- `@Dev check person@example.com license`
+- `@Dev suspend person@example.com`
+- `@Dev show Engine status`
+- `@Dev quick deploy License Manager`
 
-- `dev_control_status`
-- `release_overview`
-- `prepare_release_source`
-- `recent_dev_jobs`
-- `service_action`
-- `license_manager_view`
-- `license_control`
-- `authority_lockdown`
+## Tools
 
-The first Base/Engine mutation uses the existing guarded source-promotion workflows. It validates current `main` before moving `base-release` or `UPDATE_RELEASE`; it does not silently publish a customer release.
+### `show_dev`
+Opens the ChatGPT Dev Panel interface.
 
-## Controls
+### `status`
+Reads Base, Engine, License Manager, Billing Store or customer state.
 
-MCP settings are independent from Dev Control settings and live in `dev_mcp_settings`.
+### `prepare`
+Targets: `base`, `engine`, `both`.
 
-They control:
+For each selected source repository it:
 
-- MCP enabled
-- read-only mode
-- mutations allowed
-- critical confirmations
-- Base tools
-- Engine/updater tools
-- License Manager tools
-- Billing Store tools
-- authority controls
-- audit logging
+1. compares current `main` with the release branch;
+2. reports outstanding commits/files;
+3. dispatches the repository's existing `sync-release-branch.yml` workflow;
+4. lets that workflow run the repository checks;
+5. moves `base-release` or `UPDATE_RELEASE` only after validation passes.
 
-The Dev Control emergency kill switch still overrides MCP mutations.
+It does not publish or deploy a customer release.
+
+### `deploy`
+Targets: `license_manager`, `billing_store`.
+
+Actions: `status`, `scan`, `deploy`, `quick_deploy`, `redeploy`, `cancel`, `retry`.
+
+Normal deploy requires a successful Full Scan for the exact current main commit. Quick Deploy is the explicit bypass path already provided by the service workflow. Billing Store Quick Deploy can also target an explicit branch because its existing workflow supports that input. Cancel/retry operate on an explicit GitHub workflow run ID.
+
+### `release`
+Reads and controls authoritative License Manager releases. Supports list/get/manifest/validation/source/build/failures/compare and lifecycle controls such as approve, reject, publish, withdraw, archive, restore, promote and rollback.
+
+### `update`
+Resolves the customer/install, reads the authoritative update from License Manager, calculates the component plan, and uses the Billing Store customer deployer for apply/retry/rollback.
+
+### `license`
+Reads a customer licence by email, customer number, account ID or licence ID. Billing Store is used to resolve customer linkage when necessary. License Manager supplies the authoritative licence, components, activations/runtime state, pulse and audit history.
+
+### `license_change`
+Owner-only licence mutation. Actions include suspend, unsuspend/restore, revoke, rotate, component changes, installation unlock, runtime revalidation and customer licence linking.
+
+Normal customer licence actions do not add an extra Dev MCP confirmation step.
+
+### `diagnose`
+Combined Base/Engine/License Manager/Billing Store diagnostic snapshot, optionally including a customer.
+
+### `logs`
+Reads GitHub Actions workflow/job/step state for Base, Engine, License Manager or Billing Store.
+
+## Customer lookup by email
+
+The preferred operator identity is the customer's email, for example:
+
+`@Dev check person@example.com license`
+
+Resolution is:
+
+```
+email
+  -> Billing Store customer/account
+  -> customer number + bindings/installations
+  -> License Manager licence(s)
+  -> authoritative runtime/release/update state
+```
+
+If a licence is not linked, `license_change action=link` can auto-link a single unambiguous License Manager match or link a supplied licence ID.
 
 ## Authentication
 
-The initial development endpoint accepts `Authorization: Bearer <DEV_MCP_TOKEN>`.
+OAuth 2.1 + PKCE is owner-only and backed by the Dev Panel Owner account.
 
-The secret is never returned by the Dev Panel UI.
+Scopes:
 
-This bearer mode is a development/testing boundary for direct MCP clients such as controlled API/Codex sessions. For a normal authenticated ChatGPT plugin connection, the next auth stage is OAuth 2.1 / PKCE (or a Secure MCP Tunnel for private development). Do not make the endpoint anonymous merely to connect ChatGPT.
+- `dev.read`
+- `dev.write`
+- `authority.write`
 
-## Security
-
-The MCP is intentionally powerful, but it remains structured:
-
-- no generic shell
-- no arbitrary SQL
-- no arbitrary URL proxy
-- no secret reader
-- every mutation goes through Dev Control or an authoritative service API
-- critical actions retain explicit confirmation
-- authority state remains owned by Custom License Manager
-- release/update execution follows the existing Base/Engine workflows
-
-## UI
-
-Dev Panel navigation:
-
-- Networking
-  - Dev Control
-  - MCP Controls
-
-Dev Control contains API settings and target access only.
-
-MCP Controls contains MCP enablement and exposure settings only.
-
-Deployment/release buttons remain in their existing Base Releases, Update Releases and Operations pages rather than being duplicated.
+The MCP remains structured: no generic shell, arbitrary SQL, arbitrary URL proxy, or secret reader.
