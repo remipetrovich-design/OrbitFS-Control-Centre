@@ -283,6 +283,17 @@ const GROUP_PERMISSIONS=[
  "channels.read","portal.read","repositories.read","monitoring.read","audit.read"
 ] as const;
 
+export async function authenticateOwnerCredentials(emailInput:string,passwordInput:string){
+ const email=String(emailInput||"").trim().toLowerCase(),password=String(passwordInput||"");
+ if(!email||!password)throw new Error("Email and password are required");
+ const sb=authClient();
+ const {data:user,error}=await sb.from("users").select("id,email,password_hash,password_salt,display_name,role,status").ilike("email",email).maybeSingle();
+ if(error)throw new Error("Unable to connect to Dev Panel users");
+ if(!user||user.status!=="active"||String(user.role).toLowerCase()!=="owner"||!verifyPassword(password,user.password_hash,user.password_salt))throw new Error("Invalid owner credentials");
+ await sb.from("users").update({last_login_at:new Date().toISOString()}).eq("id",user.id);
+ return {id:user.id,email:user.email,display_name:user.display_name,role:user.role};
+}
+
 export const login=createServerFn({method:"POST"}).handler(async({data}:{data:{email:string;password:string}})=>{
  const email=String(data.email||"").trim().toLowerCase(),password=String(data.password||"");
  if(!email||!password)throw new Error("Email and password are required");
