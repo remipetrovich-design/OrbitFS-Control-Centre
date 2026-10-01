@@ -115,7 +115,7 @@ export async function authorizeOwner(input:Record<string,string>,email:string,pa
   scopes:request.scopes,resource:request.resource,code_challenge:request.challenge,expires_at:expiresAt,
  });
  if(error)throw new Error("Unable to issue OAuth authorization code");
- await db().from("dev_control_audit").insert({actor_id:owner.id,actor_email:owner.email,action:"oauth.authorized",target:"dev_mcp",detail:{client_id:request.clientId,scopes:request.scopes}});
+
  return {code,owner,...request};
 }
 
@@ -180,15 +180,15 @@ export function oauthAuthorizeHtml(input:Record<string,string>,clientName:string
  const hidden=Object.entries(input).map(([k,v])=>`<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}">`).join("");
  const scopes=escapeHtml(String(input.scope||"dev.read"));
  const error=errorMessage?`<div class="error">${escapeHtml(errorMessage)}</div>`:"";
- return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize OrbitFS Dev MCP</title><style>
+ return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize Private Dev Panel</title><style>
  body{margin:0;background:#080b10;color:#eef2f7;font:14px system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px}.card{width:min(460px,100%);background:#10151d;border:1px solid #273140;border-radius:18px;padding:24px;box-sizing:border-box}.eyebrow{font-size:10px;letter-spacing:.18em;color:#8ba0b8;text-transform:uppercase}h1{font-size:24px;margin:8px 0}.muted{color:#95a3b4;line-height:1.55}.scope{margin:16px 0;padding:12px;border:1px solid #273140;border-radius:10px;background:#0b1016;font-family:monospace;font-size:12px}label{display:block;margin-top:14px;font-size:12px;color:#b8c3d1}input[type=email],input[type=password]{width:100%;margin-top:6px;padding:11px 12px;border-radius:9px;border:1px solid #303b4b;background:#090e14;color:#fff;box-sizing:border-box}button{width:100%;margin-top:18px;padding:11px 14px;border:0;border-radius:9px;background:#6487ff;color:white;font-weight:700;cursor:pointer}.error{margin-top:14px;padding:10px;border-radius:9px;background:#471b21;color:#ffbec6}.warn{margin-top:16px;color:#e6c27a;font-size:12px;line-height:1.5}</style></head><body><form class="card" method="post">
- <div class="eyebrow">ORBITFS / PRIVATE DEVELOPER MCP</div><h1>Authorize Dev MCP</h1>
- <p class="muted"><b>${escapeHtml(clientName||"OpenAI MCP Client")}</b> is requesting access to your private OrbitFS Dev Control.</p>
+ <div class="eyebrow">PRIVATE DEVELOPER MCP</div><h1>Authorize Dev MCP</h1>
+ <p class="muted"><b>${escapeHtml(clientName||"OpenAI MCP Client")}</b> is requesting access to your private Dev Panel.</p>
  <div class="scope">Scopes: ${scopes}</div>${error}${hidden}
  <label>Owner email<input name="owner_email" type="email" autocomplete="username" required></label>
  <label>Owner password<input name="owner_password" type="password" autocomplete="current-password" required></label>
- <div class="warn">This MCP can control Base, Engine/updater, licensing and service operations according to Dev/MCP switches. Only authorize your own ChatGPT/Codex connection.</div>
- <button type="submit">Authorize OrbitFS Dev MCP</button>
+ <div class="warn">This MCP can control Base, Engine/updater, licensing and service operations according to MCP settings. Only authorize your own ChatGPT/Codex connection.</div>
+ <button type="submit">Authorize Private Dev Panel</button>
  </form></body></html>`;
 }
 function escapeHtml(value:any){return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]||ch))}
