@@ -32,3 +32,20 @@ License Master remains the validation/approval authority after Stage 1.
 ## Development
 
 Use `npm install` then `npm run dev` for local development.
+
+## Private ChatGPT / Codex MCP
+
+Dev Panel also hosts the owner-only private developer MCP at:
+
+`https://dev.incendiarynetworks.cc/devmcp`
+
+It is an interface into the existing Dev Panel and authoritative OrbitFS services, not a second control plane.
+
+- ChatGPT/Codex can open the embedded Dev Panel with `show_dev`.
+- `prepare base|engine|both` uses the source repositories' existing guarded release-branch workflows.
+- Customer licence commands accept email/customer identity and read authoritative licence/runtime data from Custom License Manager.
+- V2 Billing Store is used only when customer/account linkage, installation context, or customer deployer execution is required.
+- UI buttons and chat commands use the same MCP tools.
+
+See `docs/DEV_MCP.md` for the tool contract.
+
