@@ -1,49 +1,35 @@
 import {createFileRoute} from "@tanstack/react-router";
-import {requireOwner} from "@/lib/panel.server";
+import {devControlTargetList,getDevControlSettings,requireDevControlOwner} from "@/lib/dev-control.server";
 
-const TARGETS=[
- {key:"license_manager",label:"Custom License Manager",repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager"},
- {key:"billing_store",label:"V2 Billing Store",repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store"},
-];
-
-function bearer(request:Request){
- return String(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim();
-}
-
-export const Route=createFileRoute("/api/dev-control/v1/health")({
- server:{
-  handlers:{
-   GET:async({request})=>{
-    try{
-     const token=bearer(request);
-     if(!token)return Response.json({error:"UNAUTHORIZED"},{status:401});
-     requireOwner(token);
-     const enabled=String(process.env.DEV_CONTROL_ENABLED||"true").toLowerCase()!=="false";
-     return Response.json({
-      ok:true,
-      service:"orbitfs-dev-control",
-      apiVersion:"v1",
-      enabled,
-      ownerOnly:true,
-      authority:{
-       devControl:"operations-only",
-       licenseManager:"authoritative",
-      },
-      modules:{
-       deployer:{status:"foundation"},
-       updater:{status:"foundation"},
-       licensingBridge:{status:"planned"},
-       jobs:{status:"foundation"},
-      },
-      targets:TARGETS,
-      checkedAt:new Date().toISOString(),
-     },{headers:{"cache-control":"no-store"}});
-    }catch(error){
-     const message=error instanceof Error?error.message:"UNAUTHORIZED";
-     const status=/owner access required|not signed in|invalid session/i.test(message)?401:500;
-     return Response.json({error:status===401?"UNAUTHORIZED":message},{status});
-    }
-   }
-  }
+export const Route=createFileRoute("/api/dev-control/v1/health")({server:{handlers:{GET:async({request})=>{
+ try{
+  requireDevControlOwner(request);
+  const settings=await getDevControlSettings();
+  const envEnabled=String(process.env.DEV_CONTROL_ENABLED||"true").toLowerCase()!=="false";
+  return Response.json({
+   ok:true,
+   service:"orbitfs-dev-control",
+   apiVersion:"v1",
+   ownerOnly:true,
+   enabled:envEnabled&&settings.enabled!==false&&!settings.emergency_kill_switch,
+   environmentEnabled:envEnabled,
+   readOnly:settings.read_only_mode===true,
+   emergencyKillSwitch:settings.emergency_kill_switch===true,
+   storageReady:settings.storageReady!==false,
+   authority:{devControl:"independent-control-plane",licenseManager:"external-authority"},
+   modules:{
+    deployer:{status:settings.production_deploy_enabled?"ready":"disabled"},
+    updater:{status:settings.updater_controls_enabled?"ready":"disabled"},
+    licensingBridge:{status:settings.license_controls_enabled?"ready":"disabled"},
+    billingBridge:{status:settings.billing_controls_enabled?"ready":"disabled"},
+    jobs:{status:settings.storageReady===false?"migration-required":"ready"}
+   },
+   targets:devControlTargetList(),
+   checkedAt:new Date().toISOString()
+  },{headers:{"cache-control":"no-store"}});
+ }catch(error){
+  const message=error instanceof Error?error.message:"UNAUTHORIZED";
+  const auth=/Owner|UNAUTHORIZED|session|signed in/i.test(message);
+  return Response.json({ok:false,error:auth?"UNAUTHORIZED":message},{status:auth?401:500});
  }
-});
+}}}});
