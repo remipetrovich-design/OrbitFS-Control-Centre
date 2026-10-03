@@ -1005,11 +1005,16 @@ function SettingsPage({ data, connected, session, onChanged }: any) {
 
   const switchProfile=async(next:"primary"|"fallback")=>{
     if(!session?.token||profile?.github_profile===next)return;
+    const current=profile?.github_profile;
+    if(current!=="primary"&&current!=="fallback"){setProfileError("Reload the persisted GitHub profile before switching.");return}
+    const phrase=next==="fallback"?"SWITCH TO FALLBACK":"SWITCH TO PRIMARY";
+    const confirmation=window.prompt("This changes the GitHub source for all mapped repositories and remains active until explicitly switched. Type "+phrase+" to continue.","");
+    if(confirmation!==phrase){setProfileNotice("GitHub profile switch cancelled.");return}
     setProfileBusy(next);setProfileError("");setProfileNotice("");
     try{
-      const updated=await updateDevPanelSettings({data:{token:session.token,github_profile:next}});
+      const updated=await updateDevPanelSettings({data:{token:session.token,github_profile:next,expected_profile:current,confirmation}});
       setProfile(updated);
-      setProfileNotice(next==="fallback"?"Temporary fallback GitHub account is active.":"Primary GitHub account is active.");
+      setProfileNotice(next==="fallback"?"Fallback GitHub account is active and will remain active until explicitly switched.":"Primary GitHub account is active and will remain active until explicitly switched.");
       await onChanged?.();
     }catch(x:any){setProfileError(x?.message||"Unable to switch GitHub profile")}
     finally{setProfileBusy("")}
@@ -1023,11 +1028,11 @@ function SettingsPage({ data, connected, session, onChanged }: any) {
         detail="Runtime configuration for normal Dev Panel operations. MCP settings are separate."
       />
       <section className="orbit-panel">
-        <div className="orbit-panel-head"><span className="orbit-panel-icon"><Github size={15}/></span><div><h2>GitHub control profile</h2><p>Switch all five repository mappings together.</p></div></div>
+        <div className="orbit-panel-head"><span className="orbit-panel-icon"><Github size={15}/></span><div><h2>GitHub control profile</h2><p>Persistent Supabase setting. Switch all five repository mappings together only after explicit confirmation.</p></div></div>
         <div className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="flex items-center gap-2"><strong className="text-sm">Active account</strong><StatusPill text={active==="fallback"?"Temporary fallback":"Primary"}/></div>
+              <div className="flex items-center gap-2"><strong className="text-sm">Active account</strong><StatusPill text={active==="fallback"?"Fallback":"Primary"}/></div>
               <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">Primary maps 1→1 through 5→5 to lucaskerim123. Fallback maps the same five roles to remipetrovich-design, including Base <code>base-release</code> and Engine <code>UPDATE_RELEASES</code>.</p>
             </div>
             <div className="flex gap-2">
