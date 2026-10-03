@@ -15,10 +15,30 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. Remaining workflow steps are disabled."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
+        if: steps.profile.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Check migration configuration
+        if: steps.profile.outputs.run == 'true'
         id: config
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
@@ -36,17 +56,17 @@ jobs:
           find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort
 
       - name: Setup Supabase CLI
-        if: ${{ steps.config.outputs.configured == 'true' }}
+        if: ${{ steps.profile.outputs.run == 'true' && (steps.config.outputs.configured == 'true') }}
         uses: supabase/setup-cli@v1
         with:
           version: latest
 
       - name: Apply pending migrations
-        if: ${{ steps.config.outputs.configured == 'true' }}
+        if: ${{ steps.profile.outputs.run == 'true' && (steps.config.outputs.configured == 'true') }}
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: supabase db push --db-url "$SUPABASE_DB_URL"
 
       - name: Migration configuration reminder
-        if: ${{ steps.config.outputs.configured != 'true' }}
+        if: ${{ steps.profile.outputs.run == 'true' && (steps.config.outputs.configured != 'true') }}
         run: echo "Dev Panel database migration automation is ready; configure the production SUPABASE_DB_URL GitHub secret to enable application."
