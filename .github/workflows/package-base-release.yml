@@ -54,7 +54,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL }}
+  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL || 'https://incendiarynetworks.cc/api/v1' }}
 
 jobs:
   base-validation:
