@@ -16,8 +16,7 @@ import {
   updatePanelUser, createAccessGroup, updateAccessGroup, getControlState,
   controlRelease, deleteAuthoritativeRelease, getChannelsState,
   getAuditState, getRepositoryStatus, getPortalMonitor, getReleaseLifecycleEvents,
-  getApiConnectionState, saveApiConnection, testApiConnection,
-  getDevPanelSettings, updateDevPanelSettings
+  getApiConnectionState, saveApiConnection, testApiConnection
 } from "@/lib/panel.server";
 
 export const Route = createFileRoute("/")({ component: Index });
@@ -987,96 +986,19 @@ function ApiConnectionsPage({session}:any){
  </section>;
 }
 
-function SettingsPage({ data, connected, session, onChanged }: any) {
+function SettingsPage({ data, connected }: any) {
   const base = data.base?.repositories?.base;
   const engine = data.engine?.repositories?.engine;
   const channels = Array.from(new Set([
     ...(data.base?.channels || []),
     ...(data.engine?.channels || []),
   ])).join(", ") || "—";
-  const [profile,setProfile]=useState<any>(null);
-  const [profileBusy,setProfileBusy]=useState("");
-  const [profileError,setProfileError]=useState("");
-  const [profileNotice,setProfileNotice]=useState("");
-  const [profileCheckpoint,setProfileCheckpoint]=useState<"primary"|"fallback"|null>(null);
-
-  const loadProfile=async()=>{
-    if(!session?.token)return;
-    try{setProfile(await getDevPanelSettings({data:{token:session.token}}));setProfileError("")}
-    catch(x:any){setProfileError(x?.message||"Unable to load GitHub profile")}
-  };
-  useEffect(()=>{void loadProfile()},[session?.token]);
-
-  const switchProfile=async(next:"primary"|"fallback")=>{
-    if(!session?.token||profile?.github_profile===next)return;
-    const current=profile?.github_profile;
-    if(current!=="primary"&&current!=="fallback"){setProfileError("Reload the persisted GitHub profile before switching.");return}
-    const phrase=next==="fallback"?"SWITCH TO FALLBACK":"SWITCH TO PRIMARY";
-    const confirmation=window.prompt("This changes the GitHub source for all mapped repositories and remains active until explicitly switched. Type "+phrase+" to continue.","");
-    if(confirmation!==phrase){setProfileNotice("GitHub profile switch cancelled.");return}
-    setProfileBusy(next);setProfileError("");setProfileNotice("");
-    try{
-      const updated=await updateDevPanelSettings({data:{token:session.token,github_profile:next,expected_profile:current,confirmation}});
-      setProfile(updated);
-      setProfileNotice(next==="fallback"?"Fallback GitHub account is active and will remain active until explicitly switched.":"Primary GitHub account is active and will remain active until explicitly switched.");
-      await onChanged?.();
-    }catch(x:any){setProfileError(x?.message||"Unable to switch GitHub profile")}
-    finally{setProfileBusy("")}
-  };
-
-  const requestProfileSwitch=(next:"primary"|"fallback")=>{
-    if(!session?.token||profile?.github_profile===next||profileBusy)return;
-    setProfileError("");
-    setProfileNotice("");
-    setProfileCheckpoint(next);
-  };
-
-  const rejectVercelCheckpoint=()=>{
-    setProfileCheckpoint(null);
-    setProfileNotice("");
-    setProfileError("Your an idiot, Go change them first");
-  };
-
-  const acceptVercelCheckpoint=()=>{
-    const next=profileCheckpoint;
-    setProfileCheckpoint(null);
-    if(next)void switchProfile(next);
-  };
-
-  const active=profile?.github_profile||"—";
   return (
     <section className="space-y-4">
       <PageHead
         title="Configuration"
-        detail="Runtime configuration for normal Dev Panel operations. MCP settings are separate."
+        detail="Runtime configuration for normal Dev Panel operations. MAIN / FALLBACK source authority is controlled only from License Manager API Control."
       />
-      <section className="orbit-panel">
-        <div className="orbit-panel-head"><span className="orbit-panel-icon"><Github size={15}/></span><div><h2>GitHub control profile</h2><p>Persistent Supabase setting. Switch all five repository mappings together only after explicit confirmation.</p></div></div>
-        <div className="p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-2"><strong className="text-sm">Active account</strong><StatusPill text={active==="fallback"?"Fallback":"Primary"}/></div>
-              <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">Primary maps 1→1 through 5→5 to lucaskerim123. Fallback maps the same five roles to remipetrovich-design, including Base <code>base-release</code> and Engine <code>UPDATE_RELEASE</code>.</p>
-            </div>
-            <div className="flex gap-2">
-              <button className={active==="primary"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="primary"} onClick={()=>requestProfileSwitch("primary")}>Primary · lucaskerim123</button>
-              <button className={active==="fallback"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="fallback"} onClick={()=>requestProfileSwitch("fallback")}>Fallback · remipetrovich-design</button>
-            </div>
-          </div>
-          {profileError&&<div className="mt-3 rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-100">{profileError}</div>}
-          {profileNotice&&<div className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">{profileNotice}</div>}
-        </div>
-      </section>
-      {profileCheckpoint&&<div className="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-4" role="presentation">
-        <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="github-profile-vercel-checkpoint">
-          <h3 id="github-profile-vercel-checkpoint" className="text-base font-semibold">Have you set the Vercel?</h3>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">Confirm this before switching the active GitHub profile.</p>
-          <div className="mt-5 flex justify-end gap-2">
-            <button type="button" className="button-secondary" onClick={rejectVercelCheckpoint}>No</button>
-            <button type="button" className="button-primary" onClick={acceptVercelCheckpoint}>Yes</button>
-          </div>
-        </div>
-      </div>}
       <div className="grid gap-4 md:grid-cols-2">
         <ConfigCard
           title="License Master"

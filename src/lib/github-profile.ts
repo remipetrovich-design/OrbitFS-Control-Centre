@@ -1,5 +1,3 @@
-import {createClient} from "@supabase/supabase-js";
-
 export type GithubProfileName="primary"|"fallback";
 
 export type GithubProfile={
@@ -47,21 +45,22 @@ function fallbackProfileName():GithubProfileName{
 
 async function storedProfileName():Promise<GithubProfileName>{
  if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
- const url=String(process.env.SUPABASE_URL||"").trim();
- const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||"").trim();
- if(!url||!key){
-  const name=fallbackProfileName();
+ const base=String(process.env.LICENSE_MANAGER_URL||process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim().replace(/\/+$/,"");
+ try{
+  const response=await fetch(base+"/github-profile",{cache:"no-store",signal:AbortSignal.timeout(5000)});
+  if(!response.ok)throw new Error("License Manager profile endpoint returned "+response.status);
+  const body=await response.json();
+  const raw=String(body?.profile||"").trim().toLowerCase();
+  if(raw!=="primary"&&raw!=="fallback")throw new Error("License Manager source profile is invalid or missing.");
+  const name=raw as GithubProfileName;
   profileCache={name,expires:Date.now()+5000};
   return name;
+ }catch(error){
+  if(profileCache)return profileCache.name;
+  const name=fallbackProfileName();
+  profileCache={name,expires:Date.now()+2000};
+  return name;
  }
- const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
- const {data,error}=await db.from("dev_panel_settings").select("github_profile").eq("id",true).single();
- if(error)throw new Error("Unable to resolve persisted GitHub profile: "+error.message);
- const raw=String(data?.github_profile||"").trim().toLowerCase();
- if(raw!=="primary"&&raw!=="fallback")throw new Error("Persisted GitHub profile is invalid or missing.");
- const name=raw as GithubProfileName;
- profileCache={name,expires:Date.now()+5000};
- return name;
 }
 
 export function clearGithubProfileCache(){profileCache=null;}
