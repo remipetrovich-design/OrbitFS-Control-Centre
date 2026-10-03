@@ -1535,7 +1535,7 @@ function cleanRepositorySyncRun(run:any){
 }
 export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
- const cfg=repositorySyncConfig();
+ const cfg=await repositorySyncConfig();
  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
  const runs=Array.isArray(result?.workflow_runs)?result.workflow_runs:[];
  const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
@@ -1544,7 +1544,7 @@ export const getRepositorySyncState=createServerFn({method:"POST"}).handler(asyn
 });
 export const runRepositorySync=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
- const cfg=repositorySyncConfig();
+ const cfg=await repositorySyncConfig();
  const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
  const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
  if(active)return {ok:true,alreadyRunning:true,run:cleanRepositorySyncRun(active),message:"Repository sync is already running."};
