@@ -283,10 +283,11 @@ export function requireOwner(token:string){
 export const getDevPanelSettings=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
  const sb=authClient();
- const {data:row,error}=await sb.from("dev_panel_settings").select("github_profile,updated_at,updated_by").eq("id",true).maybeSingle();
+ const {data:row,error}=await sb.from("dev_panel_settings").select("github_profile,updated_at,updated_by").eq("id",true).single();
  if(error)throw new Error("Unable to load Dev Panel settings: "+error.message);
- const profile=String(row?.github_profile||await activeGithubProfileName())==="fallback"?"fallback":"primary";
- return {github_profile:profile,updated_at:row?.updated_at||null,profiles:githubProfileDefinitions()};
+ const raw=String(row?.github_profile||"").trim().toLowerCase();
+ if(raw!=="primary"&&raw!=="fallback")throw new Error("Persisted GitHub profile is invalid or missing.");
+ return {github_profile:raw,updated_at:row.updated_at||null,updated_by:row.updated_by||null,profiles:githubProfileDefinitions()};
 });
 
 async function verifyGithubProfileCredential(profileName:"primary"|"fallback"){
@@ -306,16 +307,33 @@ async function verifyGithubProfileCredential(profileName:"primary"|"fallback"){
  return true;
 }
 
-export const updateDevPanelSettings=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;github_profile:"primary"|"fallback"}})=>{
+export const updateDevPanelSettings=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;github_profile:"primary"|"fallback";expected_profile:"primary"|"fallback";confirmation:string}})=>{
  const actor=requireOwner(data.token);
- const profile=data.github_profile==="fallback"?"fallback":"primary";
+ if(data.github_profile!=="primary"&&data.github_profile!=="fallback")throw new Error("Invalid GitHub profile");
+ if(data.expected_profile!=="primary"&&data.expected_profile!=="fallback")throw new Error("Invalid current GitHub profile");
+ const profile=data.github_profile;
+ const expected=data.expected_profile;
+ if(profile===expected)throw new Error(profile+" GitHub profile is already active");
+ const phrase=profile==="fallback"?"SWITCH TO FALLBACK":"SWITCH TO PRIMARY";
+ if(String(data.confirmation||"")!==phrase)throw new Error("GitHub profile switch confirmation did not match");
  await verifyGithubProfileCredential(profile);
- const {error}=await authClient().from("dev_panel_settings").upsert({
-  id:true,github_profile:profile,updated_by:actor.id,updated_at:new Date().toISOString()
- },{onConflict:"id"});
+ const sb=authClient();
+ const changedAt=new Date().toISOString();
+ const {data:updated,error}=await sb.from("dev_panel_settings").update({
+  github_profile:profile,updated_by:actor.id,updated_at:changedAt
+ }).eq("id",true).eq("github_profile",expected).select("github_profile,updated_at,updated_by").maybeSingle();
  if(error)throw new Error("Unable to update Dev Panel settings: "+error.message);
+ if(!updated)throw new Error("GitHub profile changed since this page was loaded. Refresh and verify the active account before switching.");
+ const {error:auditError}=await sb.from("panel_access_audit").insert({
+  actor_id:actor.id,
+  action:"github_profile.changed",
+  target_type:"dev_panel_settings",
+  target_id:"github_profile",
+  detail:{from:expected,to:profile,changed_at:changedAt}
+ });
+ if(auditError)console.error("GitHub profile audit write failed",auditError);
  clearGithubProfileCache();
- return {github_profile:profile,profiles:githubProfileDefinitions()};
+ return {github_profile:profile,updated_at:updated.updated_at||changedAt,updated_by:updated.updated_by||actor.id,profiles:githubProfileDefinitions()};
 });
 function hashPassword(password:string){
  if(password.length<10)throw new Error("Temporary password must be at least 10 characters");
