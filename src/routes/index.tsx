@@ -1056,7 +1056,7 @@ function SettingsPage({ data, connected, session, onChanged }: any) {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2"><strong className="text-sm">Active account</strong><StatusPill text={active==="fallback"?"Fallback":"Primary"}/></div>
-              <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">Primary maps 1→1 through 5→5 to lucaskerim123. Fallback maps the same five roles to remipetrovich-design, including Base <code>base-release</code> and Engine <code>UPDATE_RELEASES</code>.</p>
+              <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">Primary maps 1→1 through 5→5 to lucaskerim123. Fallback maps the same five roles to remipetrovich-design, including Base <code>base-release</code> and Engine <code>UPDATE_RELEASE</code>.</p>
             </div>
             <div className="flex gap-2">
               <button className={active==="primary"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="primary"} onClick={()=>requestProfileSwitch("primary")}>Primary · lucaskerim123</button>
