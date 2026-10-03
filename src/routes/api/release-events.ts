@@ -14,7 +14,7 @@ function safeEqual(a:string,b:string){
 function service(){
  return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});
 }
-const TYPES=new Set(["rolled_back","rollback_failed","reverted","revert_failed","archived"]);
+const TYPES=new Set(["rolled_back","rollback_failed","reverted","revert_failed","archived","returned_to_dev"]);
 const RELEASE_TYPES=new Set(["base","update"]);
 
 export const Route=createFileRoute("/api/release-events")({
