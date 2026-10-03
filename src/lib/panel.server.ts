@@ -1512,17 +1512,9 @@ const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DE
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
 const REPOSITORY_SYNC_WORKFLOW="sync-github-mirrors.yml";
 
-function repositorySyncConfig(){
+async function repositorySyncConfig(){
  const profiles=githubProfileDefinitions();
- const primaryRepo=String(profiles.primary.devPanel.repo).toLowerCase();
- const fallbackRepo=String(profiles.fallback.devPanel.repo).toLowerCase();
- const vercelRepo=[process.env.VERCEL_GIT_REPO_OWNER,process.env.VERCEL_GIT_REPO_SLUG].filter(Boolean).join("/").toLowerCase();
- const explicitRepo=String(process.env.ORBITFS_CONTROL_REPOSITORY||"").trim().toLowerCase();
- const detected=explicitRepo||vercelRepo;
- let side:"primary"|"fallback";
- if(detected===fallbackRepo)side="fallback";
- else if(detected===primaryRepo)side="primary";
- else side=String(process.env.ORBITFS_GITHUB_PROFILE||"primary").trim().toLowerCase()==="fallback"?"fallback":"primary";
+ const side=await activeGithubProfileName();
  const source=side==="primary"?profiles.primary:profiles.fallback;
  const target=side==="primary"?profiles.fallback:profiles.primary;
  return {
@@ -1534,7 +1526,7 @@ function repositorySyncConfig(){
  };
 }
 async function repositorySyncGithub(path:string,init:RequestInit={}){
- const cfg=repositorySyncConfig();
+ const cfg=await repositorySyncConfig();
  const token=required(cfg.side==="primary"?"ORBITFS_RELEASE_DISPATCH_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
  return requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
 }
