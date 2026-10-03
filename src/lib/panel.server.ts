@@ -1492,6 +1492,62 @@ const OPERATIONS_CI_WORKFLOW=process.env.OPERATIONS_CI_WORKFLOW||"ci.yml";
 const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml";
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
+const REPOSITORY_SYNC_WORKFLOW="sync-github-mirrors.yml";
+
+function repositorySyncConfig(){
+ const profiles=githubProfileDefinitions();
+ const primaryRepo=String(profiles.primary.devPanel.repo).toLowerCase();
+ const fallbackRepo=String(profiles.fallback.devPanel.repo).toLowerCase();
+ const vercelRepo=[process.env.VERCEL_GIT_REPO_OWNER,process.env.VERCEL_GIT_REPO_SLUG].filter(Boolean).join("/").toLowerCase();
+ const explicitRepo=String(process.env.ORBITFS_CONTROL_REPOSITORY||"").trim().toLowerCase();
+ const detected=explicitRepo||vercelRepo;
+ let side:"primary"|"fallback";
+ if(detected===fallbackRepo)side="fallback";
+ else if(detected===primaryRepo)side="primary";
+ else side=String(process.env.ORBITFS_GITHUB_PROFILE||"primary").trim().toLowerCase()==="fallback"?"fallback":"primary";
+ const source=side==="primary"?profiles.primary:profiles.fallback;
+ const target=side==="primary"?profiles.fallback:profiles.primary;
+ return {
+  side,
+  controlRepo:source.devPanel.repo,
+  sourceOwner:source.owner,
+  targetOwner:target.owner,
+  buttonLabel:side==="primary"?"Sync to fallback":"Sync to primary",
+ };
+}
+async function repositorySyncGithub(path:string,init:RequestInit={}){
+ const cfg=repositorySyncConfig();
+ const token=required(cfg.side==="primary"?"ORBITFS_RELEASE_DISPATCH_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
+ return requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
+}
+function cleanRepositorySyncRun(run:any){
+ return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name}:null;
+}
+export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOperationsUser(data.token);
+ const cfg=repositorySyncConfig();
+ const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+ const runs=Array.isArray(result?.workflow_runs)?result.workflow_runs:[];
+ const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ const active=runs.filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase())).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ return {...cfg,active:Boolean(active),activeRun:cleanRepositorySyncRun(active),latestRun:cleanRepositorySyncRun(latest)};
+});
+export const runRepositorySync=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOperationsUser(data.token);
+ const cfg=repositorySyncConfig();
+ const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+ const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
+ if(active)return {ok:true,alreadyRunning:true,run:cleanRepositorySyncRun(active),message:"Repository sync is already running."};
+ const startedAt=Date.now();
+ await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main",inputs:{confirmation:"SYNC"}})});
+ let run:any=null;
+ for(let attempt=0;attempt<8&&!run;attempt++){
+  await new Promise(resolve=>setTimeout(resolve,700));
+  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+  run=(result?.workflow_runs||[]).filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=startedAt-5000).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ }
+ return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:"Repository sync queued: "+cfg.sourceOwner+" → "+cfg.targetOwner+"."};
+});
 type OperationsSystem="baseSource"|"engineSource"|"licenseManager"|"billingStore";
 
 async function operationsRepos(){
