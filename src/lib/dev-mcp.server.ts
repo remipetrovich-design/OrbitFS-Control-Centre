@@ -1,7 +1,7 @@
 import {createClient} from "@supabase/supabase-js";
 import {createServerFn} from "@tanstack/react-start";
 import crypto from "node:crypto";
-import {inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
+import {clearReleaseStateCore,inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
 import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
 import {activeGithubProfile,activeGithubProfileName,githubToken,githubProfiles} from "@/lib/github-profile";
 
@@ -536,10 +536,10 @@ export async function releaseBuildCommand(input:{action:string;target:ReleaseTar
 export async function releaseCommand(input:{action:string;release_id?:string;other_release_id?:string;type?:string;channel?:string;target_channel?:string;reason?:string}){
  await assertTargetEnabled("license_manager");
  const action=String(input.action||"list").toLowerCase();
- const mutation=new Set(["approve","reject","publish","unpublish","withdraw","archive","deprecate","restore","promote","rollback","revert","pause"]);
+ const mutation=new Set(["approve","reject","return_to_dev","send_back","delete","clear","publish","unpublish","withdraw","archive","deprecate","restore","promote","rollback","revert","pause"]);
  if(mutation.has(action)){
   const mutationSettings=await assertMutation("license_manager");
-  if(["approve","reject"].includes(action))requireSetting(mutationSettings,"allow_release_review","Release approve/reject is disabled");
+  if(["approve","reject","return_to_dev","send_back","delete","clear"].includes(action))requireSetting(mutationSettings,"allow_release_review","Release review/reset control is disabled");
   else if(["rollback","revert"].includes(action))requireSetting(mutationSettings,"allow_release_rollback","Release rollback/revert is disabled");
   else requireSetting(mutationSettings,"allow_release_publish","Release publication/lifecycle changes are disabled");
  }
@@ -561,6 +561,21 @@ export async function releaseCommand(input:{action:string;release_id?:string;oth
   const other=String(input.other_release_id||"").trim();if(!other)throw new Error("other_release_id is required");
   const [a,b]=await Promise.all([licenseManagerRequest("/releases/"+encodeURIComponent(id)),licenseManagerRequest("/releases/"+encodeURIComponent(other))]);
   return {left:a?.release||a,right:b?.release||b};
+ }
+ if(action==="return_to_dev"||action==="send_back"){
+  return licenseManagerRequest("/releases/"+encodeURIComponent(id),{method:"POST",body:JSON.stringify({action:"return_to_dev",reason:input.reason||"Returned to Dev/Control Centre for rework"})});
+ }
+ if(action==="delete"||action==="clear"){
+  const current=await licenseManagerRequest("/releases/"+encodeURIComponent(id));
+  const release=current?.release||current;
+  if(!release?.id)throw new Error("Release was not found");
+  if(release.published_at||String(release.status||"").toLowerCase()==="published")throw new Error("Published release history cannot be deleted or cleared. Unpublish first; published history will still be preserved.");
+  const releaseType=String(release.release_type||"").toLowerCase()==="update"?"update":"base";
+  const channel=String(release.channel||"stable").trim().toLowerCase()||"stable";
+  const version=String(release.version||"").trim();
+  if(action==="clear")return clearReleaseStateCore({type:releaseType==="base"?"base":"engine",version,channel});
+  await billingStoreRequest("/api/internal/orbitfs/release-reset",{method:"POST",body:JSON.stringify({releaseIds:[id],version,releaseType,channel})});
+  return licenseManagerRequest("/releases/"+encodeURIComponent(id),{method:"POST",body:JSON.stringify({action:"delete",reason:input.reason||"Deleted from API Control"})});
  }
  const mapped=action==="unpublish"?"withdraw":action==="deprecate"?"archive":action;
  return licenseManagerRequest("/releases/"+encodeURIComponent(id),{method:"POST",body:JSON.stringify({action:mapped,target_channel:input.target_channel,reason:input.reason})});
