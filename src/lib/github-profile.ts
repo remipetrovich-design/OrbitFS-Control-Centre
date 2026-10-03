@@ -43,20 +43,19 @@ function fallbackProfileName():GithubProfileName{
 
 async function storedProfileName():Promise<GithubProfileName>{
  if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
- try{
-  const url=String(process.env.SUPABASE_URL||"").trim();
-  const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||"").trim();
-  if(url&&key){
-   const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
-   const {data,error}=await db.from("dev_panel_settings").select("github_profile").eq("id",true).maybeSingle();
-   if(!error){
-    const name=String(data?.github_profile||"").toLowerCase()==="fallback"?"fallback":"primary";
-    profileCache={name,expires:Date.now()+5000};
-    return name;
-   }
-  }
- }catch{}
- const name=fallbackProfileName();
+ const url=String(process.env.SUPABASE_URL||"").trim();
+ const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||"").trim();
+ if(!url||!key){
+  const name=fallbackProfileName();
+  profileCache={name,expires:Date.now()+5000};
+  return name;
+ }
+ const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+ const {data,error}=await db.from("dev_panel_settings").select("github_profile").eq("id",true).single();
+ if(error)throw new Error("Unable to resolve persisted GitHub profile: "+error.message);
+ const raw=String(data?.github_profile||"").trim().toLowerCase();
+ if(raw!=="primary"&&raw!=="fallback")throw new Error("Persisted GitHub profile is invalid or missing.");
+ const name=raw as GithubProfileName;
  profileCache={name,expires:Date.now()+5000};
  return name;
 }
