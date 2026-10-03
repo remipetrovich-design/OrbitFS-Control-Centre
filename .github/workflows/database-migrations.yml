@@ -1,12 +1,6 @@
 name: Dev Panel database migrations
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "supabase/migrations/**"
-      - ".github/workflows/database-migrations.yml"
   workflow_dispatch:
 
 permissions:
