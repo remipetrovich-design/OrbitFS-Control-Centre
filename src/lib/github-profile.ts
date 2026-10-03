@@ -48,7 +48,7 @@ async function storedProfileName():Promise<GithubProfileName>{
   const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||"").trim();
   if(url&&key){
    const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
-   const {data,error}=await db.from("dev_mcp_settings").select("github_profile").eq("id",true).maybeSingle();
+   const {data,error}=await db.from("dev_panel_settings").select("github_profile").eq("id",true).maybeSingle();
    if(!error){
     const name=String(data?.github_profile||"").toLowerCase()==="fallback"?"fallback":"primary";
     profileCache={name,expires:Date.now()+5000};
