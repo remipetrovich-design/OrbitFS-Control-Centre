@@ -37,6 +37,48 @@ jobs:
           test -n "${SOURCE_TOKEN:-}" || { echo "::error::Source GitHub credential is missing."; exit 1; }
           test -n "${TARGET_TOKEN:-}" || { echo "::error::Target GitHub credential is missing."; exit 1; }
 
+          if [ "$GITHUB_REPOSITORY" = "remipetrovich-design/OrbitFS-Control-Centre" ]; then
+            target_repos=(
+              "lucaskerim123/V1-vercel-base"
+              "lucaskerim123/V1-vercel-engine"
+              "lucaskerim123/Custom-licence-manager"
+              "lucaskerim123/V2_Billing_Store"
+              "lucaskerim123/Dev-panel"
+            )
+            target_label="Lucas primary"
+            target_secret="ORBITFS_RELEASE_DISPATCH_TOKEN"
+          else
+            target_repos=(
+              "remipetrovich-design/OrbitFS-Base-System"
+              "remipetrovich-design/OrbitFS_Engine"
+              "remipetrovich-design/OrbitFS-License-Administration"
+              "remipetrovich-design/OrbitFS-Billing-Shopfront"
+              "remipetrovich-design/OrbitFS-Control-Centre"
+            )
+            target_label="Remi fallback"
+            target_secret="ORBITFS_FALLBACK_GITHUB_TOKEN"
+          fi
+
+          failed=0
+          for target_repo in "${target_repos[@]}"; do
+            response_file="$(mktemp)"
+            status="$(curl --silent --show-error --location               --output "$response_file"               --write-out "%{http_code}"               -H "Authorization: Bearer $TARGET_TOKEN"               -H "Accept: application/vnd.github+json"               -H "X-GitHub-Api-Version: 2022-11-28"               "https://api.github.com/repos/$target_repo")"
+            if [ "$status" != "200" ]; then
+              echo "::error::Target credential $target_secret cannot access $target_repo (GitHub HTTP $status)."
+              failed=1
+            elif [ "$(jq -r '.permissions.push // false' "$response_file")" != "true" ]; then
+              echo "::error::Target credential $target_secret can read $target_repo but does not have push permission."
+              failed=1
+            else
+              echo "Verified target write permission: $target_repo"
+            fi
+            rm -f "$response_file"
+          done
+          test "$failed" = "0" || {
+            echo "::error::$target_label sync credential is not writable for all five target repositories. Update the named Actions secret before retrying repository sync."
+            exit 1
+          }
+
       - name: Checkout Base source
         uses: actions/checkout@v4
         with:
