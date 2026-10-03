@@ -35,6 +35,10 @@ const FALLBACK:GithubProfile={
  billingStore:{repo:process.env.FALLBACK_BILLING_STORE_REPO||"remipetrovich-design/OrbitFS-Billing-Shopfront",branch:"main"}
 };
 
+// Runtime/release operations are permanently bound to this repository family.
+// The persisted profile switch only decides which family is allowed to run.
+const LOCAL_PROFILE:GithubProfile=FALLBACK;
+
 let profileCache:{name:GithubProfileName;expires:number}|null=null;
 
 function fallbackProfileName():GithubProfileName{
@@ -65,14 +69,12 @@ export function clearGithubProfileCache(){profileCache=null;}
 export async function activeGithubProfileName():Promise<GithubProfileName>{
  return storedProfileName();
 }
-export async function activeGithubProfile():Promise<GithubProfile>{
- return (await activeGithubProfileName())==="fallback"?FALLBACK:PRIMARY;
-}
+export function localGithubProfileName():GithubProfileName{return LOCAL_PROFILE.name;}
+export async function activeGithubProfile():Promise<GithubProfile>{return LOCAL_PROFILE;}
 export async function githubToken(){
- const profile=await activeGithubProfile();
- const value=String(process.env[profile.tokenEnv]||"").trim();
- if(!value)throw new Error("Missing server environment variable: "+profile.tokenEnv+" for "+profile.name+" GitHub profile");
+ const value=String(process.env[LOCAL_PROFILE.tokenEnv]||"").trim();
+ if(!value)throw new Error("Missing server environment variable: "+LOCAL_PROFILE.tokenEnv+" for local "+LOCAL_PROFILE.name+" GitHub system");
  return value;
 }
-export async function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:await activeGithubProfileName()};}
+export async function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:await activeGithubProfileName(),local:LOCAL_PROFILE.name};}
 export function githubProfileDefinitions(){return {primary:PRIMARY,fallback:FALLBACK};}
