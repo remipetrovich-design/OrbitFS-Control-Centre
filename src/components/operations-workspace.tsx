@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,ChevronRight,ExternalLink,FileCode2,Github,Loader2,Play,RefreshCw,Server,ShieldCheck,Terminal,XCircle,Zap} from "lucide-react";
-import {getOperationsState,getOperationsScan,runOperation} from "@/lib/panel.server";
+import {getOperationsState,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
 
 const SYSTEMS=[
  {key:"licenseManager",label:"Custom License Manager"},
@@ -23,6 +23,7 @@ export function OperationsWorkspace({session}:{session:any}){
  const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
  const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:true,billingStore:true});
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
+ const [syncState,setSyncState]=useState<any>(null);
 
  const load=useCallback(async(silent=false)=>{
   if(!silent)setLoading(true);
@@ -31,8 +32,13 @@ export function OperationsWorkspace({session}:{session:any}){
   finally{if(!silent)setLoading(false)}
  },[session.token]);
 
+ const loadSync=useCallback(async()=>{
+  try{const r=await getRepositorySyncState({data:{token:session.token}});setSyncState(r)}
+  catch(x:any){setError(x.message||"Unable to load repository sync state.")}
+ },[session.token]);
+
  const refreshAll=async()=>{
-  setLoading(true);setError("");
+  setLoading(true);setError("");void loadSync();
   try{
    const [state,...scanResults]=await Promise.all([
     getOperationsState({data:{token:session.token}}),
@@ -45,6 +51,9 @@ export function OperationsWorkspace({session}:{session:any}){
  };
 
  useEffect(()=>{void load()},[load]);
+ useEffect(()=>{void loadSync()},[loadSync]);
+ const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
+ useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),15000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
  useEffect(()=>{const t=setInterval(()=>void load(true),live?15000:60000);return()=>clearInterval(t)},[live,load]);
 
@@ -59,6 +68,19 @@ export function OperationsWorkspace({session}:{session:any}){
    setConsoleOpen(v=>({...v,[system]:true}));
    await load(true);
   }catch(x:any){setError(x.message||"Unable to start workflow.")}
+  finally{setBusy("")}
+ };
+
+ const syncRepositories=async()=>{
+  if(!syncState)return;
+  const direction=syncState.sourceOwner+" → "+syncState.targetOwner;
+  if(!window.confirm("Sync all five main repositories "+direction+"? Target main branches will be made identical to the source, including file deletions."))return;
+  setBusy("repository-sync");setError("");setNotice("");
+  try{
+   const r=await runRepositorySync({data:{token:session.token}});
+   setNotice(r.message||"Repository sync queued.");
+   await loadSync();
+  }catch(x:any){setError(x.message||"Unable to start repository sync.")}
   finally{setBusy("")}
  };
 
@@ -89,6 +111,24 @@ export function OperationsWorkspace({session}:{session:any}){
    <div className="orbit-section-bar">
     <div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Manual deployment control</h2><p>Run Full Scan once, then Deploy the exact scanned commit without scanning again. Quick Deploy remains the intentional override path.</p></div></div>
     <span className="text-[10px] text-muted-foreground">Manual workflow dispatch only</span>
+   </div>
+  </section>
+
+  <section className="release-surface overflow-hidden">
+   <div className="orbit-section-bar">
+    <div className="orbit-section-head"><span className="orbit-section-icon"><Github size={15}/></span><div><h2>Repository mirror sync</h2><p>Manual one-way sync of all five OrbitFS main repositories. The target is verified against the source Git tree before push.</p></div></div>
+    <Pill text={syncLive?"LIVE":syncState?.latestRun?.conclusion==="success"?"PASSED":syncState?.latestRun?.conclusion?String(syncState.latestRun.conclusion).toUpperCase():"IDLE"}/>
+   </div>
+   <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="min-w-0">
+     <p className="text-xs font-semibold">{syncState?syncState.sourceOwner+" → "+syncState.targetOwner:"Loading sync direction…"}</p>
+     <p className="mt-1 text-[10px] leading-5 text-muted-foreground">Syncs Base, Engine, License Manager, Billing Store and this control panel on <code>main</code>. No extra branches are created.</p>
+     {syncState?.latestRun&&<p className="mt-1 text-[9px] text-muted-foreground">Last run #{syncState.latestRun.run_number} · {syncState.latestRun.status}{syncState.latestRun.conclusion?" · "+syncState.latestRun.conclusion:""}</p>}
+    </div>
+    <div className="flex flex-wrap items-center gap-2">
+     {syncState?.latestRun?.html_url&&<a className="button-secondary" href={syncState.latestRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last sync</a>}
+     <button className="button-primary" onClick={()=>void syncRepositories()} disabled={!syncState||!!busy||syncLive}>{busy==="repository-sync"?<Loader2 size={13} className="animate-spin"/>:<RefreshCw size={13}/>} {syncState?.buttonLabel||"Sync repositories"}</button>
+    </div>
    </div>
   </section>
 
