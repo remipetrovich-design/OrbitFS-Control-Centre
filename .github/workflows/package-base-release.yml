@@ -248,6 +248,7 @@ jobs:
         shell: bash
         env:
           LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
@@ -263,11 +264,16 @@ jobs:
             --metadata release-package/database-schema.json \
             --output release-package/base-database-package.json
           test -s release-package/base-database-package.json
+          test "$(jq -r '.sourceRepo // empty' release-package/base-database-package.json)" = "$SOURCE_REPO" || {
+            echo "::error::Base database package source repository does not match the active Base source. Expected $SOURCE_REPO."
+            exit 1
+          }
           response="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages" \
             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
             -H "Content-Type: application/json" \
             --data-binary @release-package/base-database-package.json)"
-          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceCommit:.package.sourceCommit}' <<<"$response")"
+          test "$(jq -r '.package.sourceRepo // empty' <<<"$response")" = "$SOURCE_REPO" || { echo "::error::License Manager registered the Base database package against the wrong source repository."; exit 1; }
+          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceRepo:.package.sourceRepo,sourceCommit:.package.sourceCommit}' <<<"$response")"
           test "$(jq -r '.component' <<<"$reference")" = "base" || { echo "::error::License Manager returned a non-Base database package."; exit 1; }
           test "$(jq -r '.sourceCommit' <<<"$reference")" = "$SOURCE_SHA" || { echo "::error::Base database package source commit does not match the release source."; exit 1; }
           test "$(jq -r '.databaseSchemaVersion' <<<"$reference")" = "$schema_version" || { echo "::error::Base database package schema version does not match the release schema version."; exit 1; }
