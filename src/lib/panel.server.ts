@@ -1456,7 +1456,7 @@ async function github(path:string,init:RequestInit={}){
   throw new Error("GitHub API rate limit is cooling down; live status will resume automatically.");
  }
  try{
-  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${githubToken()}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${await githubToken()}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
   if(key)githubReadCache.set(key,{value,expires:Date.now()+15000,staleUntil:Date.now()+5*60*1000});
   else githubReadCache.clear();
   return value;
