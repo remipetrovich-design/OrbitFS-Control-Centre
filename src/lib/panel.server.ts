@@ -453,22 +453,28 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // A handed-off Stage 1 snapshot is not authoritative. When its License Manager
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
- const authoritativeKeys=new Set((Array.isArray(releases?.releases)?releases.releases:[]).filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const authoritativeRows=(Array.isArray(releases?.releases)?releases.releases.filter((row:any)=>row&&typeof row==="object"):[]);
+ const authoritativeKeys=new Set(authoritativeRows.filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
- const publishedKeys=new Set((releases?.releases||[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
- const visibleDrafts=(drafts||[]).filter((d:any)=>!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
+ const publishedKeys=new Set(authoritativeRows.filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const visibleDrafts=(drafts||[]).filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
  // Refresh persisted in-flight attempts from GitHub, rather than assuming
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
   const draftKey=String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase();
+  const repackageSourceId=String(draft?.inputs?.repackageReleaseId||"").trim();
+  const repackageSourceRevision=Number(draft?.inputs?.repackageRevision||0);
+  const authoritativeReceipt=repackageSourceId
+   ? authoritativeRows.some((r:any)=>!r.archived_at&&String(r.version||"")===String(draft.version||"")&&String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase()&&String(r.id||"")!==repackageSourceId&&(String(r.supersedes_release_id||"")===repackageSourceId||Number(r.revision||0)>repackageSourceRevision))
+   : authoritativeKeys.has(draftKey);
   // Keep the persisted status inside the existing database constraint.
   // "awaiting_receipt" is a read-only display state derived from a successful
   // recorded GitHub attempt until License Manager returns the actual release.
   const completedAttempt=(grouped.get(draft.id)||[]).find((a:any)=>
    String(a.run_id||"")===String(draft.last_run_id||"")&&a.status==="success");
   if(draft.status==="building"&&completedAttempt){
-   if(authoritativeKeys.has(draftKey)){
+   if(authoritativeReceipt){
     const {error:receiptError}=await sb.from("panel_release_drafts").update({status:"handed_off",last_error:null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building");
     if(receiptError)throw new Error("Unable to reconcile License Manager receipt: "+receiptError.message);
     draft.status="handed_off";
@@ -481,7 +487,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
    const run=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id));
    const outcome=String(run?.conclusion||"").toLowerCase();
    if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
-   const nextStatus=outcome==="success"?(authoritativeKeys.has(draftKey)?"handed_off":"building"):"draft";
+   const nextStatus=outcome==="success"?(authoritativeReceipt?"handed_off":"building"):"draft";
    const displayStatus=outcome==="success"&&!authoritativeKeys.has(draftKey)?"awaiting_receipt":nextStatus;
    const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
    const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
@@ -494,7 +500,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  }
  const releaseDrafts=visibleDrafts.filter((draft:any)=>String(draft.status||"")!=="handed_off"||authoritativeKeys.has(String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase())||Boolean((grouped.get(draft.id)||[]).some((a:any)=>a.status==="success"&&a.run_id))).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
  const availableChannels=Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
- return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
+ return {releases:authoritativeRows,drafts:Array.isArray(releaseDrafts)?releaseDrafts:[],channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
 });
 
 
@@ -527,7 +533,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
    if(existing.archived_at)throw new Error("Restore the draft before editing it.");
    const {data:draft,error}=await sb.from("panel_release_drafts").update({
      version,channel,source_repo:repo,source_ref:ref,source_sha:data.sourceSha||existing.source_sha||null,
-     status:"draft",inputs,updated_at:new Date().toISOString()
+     status:"draft",inputs:{...(existing.inputs||{}),...inputs},updated_at:new Date().toISOString()
    }).eq("id",data.draftId).select("*").single();
    if(error)throw new Error(error.code==="23505"?"A Stage 1 draft already exists for this type, version and channel.":"Unable to update release draft: "+error.message);
    return {draft,created:false};
@@ -538,6 +544,60 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
  }).select("*").single();
  if(error)throw new Error(error.code==="23505"?"A Stage 1 draft already exists for this type, version and channel.":"Unable to create release draft: "+error.message);
  return {draft,created:true};
+});
+
+export const prepareReleaseRepackage=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string}})=>{
+ const actor=readSession(data.token);
+ const releaseId=String(data.releaseId||"").trim();
+ if(!releaseId)throw new Error("Release ID is required.");
+ const result=await licenseMaster(`/releases/${encodeURIComponent(releaseId)}`);
+ const release=result?.release||result;
+ if(!release?.id)throw new Error("Release was not found in License Manager.");
+ if(String(release.status||"").toLowerCase()!=="published"||release.archived_at)throw new Error("Only the current published release can be repackaged.");
+ if(String(release.review_status||"").toLowerCase()!=="approved"||String(release?.manifest?.validation?.status||"").toLowerCase()!=="passed")throw new Error("Only an approved, validated published release can be repackaged.");
+ const releaseType=String(release.release_type||"").toLowerCase()==="update"?"update":"base";
+ const version=String(release.version||"").trim();
+ const channel=normalizeChannel(String(release.channel||"stable"));
+ if(!version)throw new Error("Published release version is missing.");
+ const registry=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
+ const current=(Array.isArray(registry?.releases)?registry.releases:[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at&&String(r.review_status||"").toLowerCase()==="approved").sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ if(String(current?.id||"")!==releaseId)throw new Error("Only the current published release baseline can be repackaged. Refresh the release list and use Repackage on the current release.");
+
+ // Reuse the single Stage 1 draft as the permanent build-attempt ledger for
+ // this semantic version. License Manager owns immutable package revisions.
+ const sb=authClient();
+ const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("version",version).eq("channel",channel).maybeSingle();
+ if(readError)throw new Error("Unable to resolve Stage 1 release history: "+readError.message);
+ if(existing&&["building","awaiting_receipt"].includes(String(existing.status||"").toLowerCase()))throw new Error("This release already has a package build awaiting completion or License Manager receipt.");
+
+ const manifest=release.manifest&&typeof release.manifest==="object"?release.manifest:{};
+ const oldInputs=existing?.inputs&&typeof existing.inputs==="object"?existing.inputs:{};
+ const inputs={
+  ...oldInputs,
+  repackage:true,
+  repackageReleaseId:String(release.id),
+  repackageRevision:Number(release.revision||1),
+  notes:String(oldInputs.notes||release.notes||manifest.customer_notes||""),
+  components:Array.isArray(oldInputs.components)&&oldInputs.components.length?oldInputs.components:(Array.isArray(manifest.components)?manifest.components:(releaseType==="base"?["base"]:[])),
+  minimumBaseVersion:releaseType==="update"?String(oldInputs.minimumBaseVersion||manifest.minimumBaseVersion||""):null,
+  protocol:releaseType==="update"?String(oldInputs.protocol||manifest.minimumEngineDeployerProtocol||"1"):null,
+  changelogTemplate:releaseType==="base"?"base_deployment_log":"update_changelog",
+  changelogDraft:String(oldInputs.changelogDraft||release.notes||manifest.customer_changelog||"")
+ };
+
+ if(existing){
+  const {data:draft,error}=await sb.from("panel_release_drafts").update({
+   status:"draft",archived_at:null,last_error:null,source_repo:release.source_repo||existing.source_repo,source_ref:release.source_ref||existing.source_ref,source_sha:release.source_sha||existing.source_sha||null,inputs,updated_at:new Date().toISOString()
+  }).eq("id",existing.id).select("*").single();
+  if(error)throw new Error("Unable to reopen Stage 1 history for repackaging: "+error.message);
+  return {draft,release,created:false};
+ }
+ const {data:draft,error}=await sb.from("panel_release_drafts").insert({
+  release_type:releaseType,version,channel,source_repo:release.source_repo||(releaseType==="base"?BASE_REPO:ENGINE_REPO),source_ref:release.source_ref||(releaseType==="base"?BASE_REF:ENGINE_REF),source_sha:release.source_sha||null,
+  status:"draft",inputs,created_by:actor.email||actor.id
+ }).select("*").single();
+ if(error)throw new Error("Unable to create Stage 1 repackage history: "+error.message);
+ return {draft,release,created:true};
 });
 
 export const setReleaseDraftArchived=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;draftId:string;archived:boolean}})=>{
@@ -684,8 +744,7 @@ export const getReleaseLifecycleEvents=createServerFn({method:"POST"}).handler(a
  return {events:events||[]};
 });
 
-export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
- readSession(data.token);
+export async function inspectSourceCore(data:{type:"base"|"engine";channel?:string}){
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO,ref=data.type==="base"?BASE_REF:ENGINE_REF;
  const releaseType=data.type==="base"?"base":"update";
  const channel=normalizeChannel(data.channel||"stable");
@@ -750,9 +809,13 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
   baselineFileCount:diff.baselineFileCount,currentFileCount:diff.currentFileCount,
   compareMetadataFiles:diff.compareMetadataFiles,hasSourceChanges:diff.files.length>0,inspectedAt,publishedBaselineSha:from||null
  };
+}
+export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
+ readSession(data.token);
+ return inspectSourceCore(data);
 });
 
-export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).find((r:any)=>String(r.version)===String(data.version)&&!r.archived_at);  return {release:release||null,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
+export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).filter((r:any)=>String(r.version)===String(data.version)&&!r.archived_at).sort((a:any,b:any)=>Number(b.revision||1)-Number(a.revision||1)||new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;  return {release,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
   readSession(data.token);
   const repo=String(data.repo||"").trim();
   if(!allowedRepos.has(repo))throw new Error("Release repository is not allowed");
@@ -908,12 +971,23 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  };
 });
 
-export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null}})=>{
- const actor=readSession(data.token);
+export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
  const version=data.version.trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
  if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
  const channel=normalizeChannel(data.channel);
+ const repackage=Boolean(data.repackage);
+ const repackageReleaseId=String(data.repackageReleaseId||"").trim();
+ let repackageRelease:any=null;
+ if(repackage){
+  if(!repackageReleaseId)throw new Error("Repackage requires the published License Manager release id.");
+  const current=await licenseMaster(`/releases/${encodeURIComponent(repackageReleaseId)}`);
+  repackageRelease=current?.release||current;
+  const expectedType=data.type==="base"?"base":"update";
+  if(!repackageRelease?.id||String(repackageRelease.release_type||"").toLowerCase()!==expectedType||String(repackageRelease.version||"")!==version||normalizeChannel(String(repackageRelease.channel||"stable"))!==channel)throw new Error("Repackage target does not match this release type, version and channel.");
+  if(String(repackageRelease.status||"").toLowerCase()!=="published"||repackageRelease.archived_at)throw new Error("Only a currently published release can be repackaged.");
+  if(String(repackageRelease.review_status||"").toLowerCase()!=="approved"||String(repackageRelease?.manifest?.validation?.status||"").toLowerCase()!=="passed")throw new Error("Repackage target must be approved and validated.");
+ }
  const expectedTemplate = data.type === "base" ? "base_deployment_log" : "update_changelog";
  if (data.changelogTemplate !== expectedTemplate) throw new Error(`Use the ${expectedTemplate === "base_deployment_log" ? "Base Deployment Log" : "Update Changelog"} template for this release type.`);
  const changelogText=String(data.changelogDraft||"").trim();
@@ -950,6 +1024,8 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  const previousRelease = (previousResult?.releases || [])
   .filter((r:any) => r.review_status === "approved" && r.status === "published" && r.source_sha)
   .sort((a:any,b:any) => new Date(b.published_at || b.created_at || 0).getTime() - new Date(a.published_at || a.created_at || 0).getTime())[0];
+ if(previousRelease&&String(previousRelease.version||"")===version&&!repackage)throw new Error(`v${version} is already published in ${channel}. Use Repackage to build another immutable package revision of the same version.`);
+ if(repackage&&String(previousRelease?.id||"")!==repackageReleaseId)throw new Error("Only the authoritative current published baseline can be repackaged. Refresh the release list and re-open Repackage.");
 
  // Stage 1 is authoritative about the source snapshot sent to the worker.
  // Do not trust stale browser state for changed files or the previous commit.
@@ -984,10 +1060,10 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
   sourceDiffMeta=diff;
  }
 
- if(!initialRelease&&!initialUpdate&&previousSourceCommit===head){
+ if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
  }
- if(!initialRelease&&!initialUpdate&&!detectedFiles.length){
+ if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
  }
 
@@ -1062,22 +1138,28 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
  if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use Start Fresh or a new version before creating another attempt.");
  if(existing&&["building","awaiting_receipt"].includes(String(existing.status)))throw new Error("This release has a build awaiting completion or License Manager receipt.");
+ let reuseHandedOff=false;
  if(existing&&String(existing.status)==="handed_off"){
   // The authoritative release may have been cleared since the previous successful handoff.
   // Reconcile only on an explicit new build, never while merely reading the release list.
   const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
   const matching=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>String(r.version||"")===version);
-  if(matching.length)throw new Error("This release still exists in License Manager. Open its authoritative record or use Start Fresh before rebuilding.");
-  if(existing.last_run_id){
+  if(matching.length){
+   if(!repackage)throw new Error("This release still exists in License Manager. Open its authoritative record or use Repackage for another package revision.");
+   if(!matching.some((r:any)=>String(r.id)===repackageReleaseId&&String(r.status||"").toLowerCase()==="published"))throw new Error("The selected published release is no longer the active repackage target. Refresh and try again.");
+   reuseHandedOff=true;
+  }else{
+   if(existing.last_run_id){
     const previousRun=await github(`/repos/${workerRepo}/actions/runs/${Number(existing.last_run_id)}`);
     if(previousRun?.status!=="completed")throw new Error("The previous release workflow is still active. Wait for it to finish before starting fresh.");
+   }
+   const {error:staleDeleteError}=await sb.from("panel_release_drafts").delete().eq("id",existing.id).eq("status","handed_off");
+   if(staleDeleteError)throw new Error("License Manager has no release, but the old Stage 1 draft could not be cleared: "+staleDeleteError.message);
   }
-  const {error:staleDeleteError}=await sb.from("panel_release_drafts").delete().eq("id",existing.id).eq("status","handed_off");
-  if(staleDeleteError)throw new Error("License Manager has no release, but the old Stage 1 draft could not be cleared: "+staleDeleteError.message);
  }
 
- const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents};
- let draft:any=existing?.status==="handed_off"?null:existing;
+ const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents,repackage,repackageReleaseId:repackage?repackageReleaseId:null,repackageRevision:repackage?Number(repackageRelease?.revision||1):null};
+ let draft:any=existing?.status==="handed_off"?(reuseHandedOff?existing:null):existing;
  if(!draft){
    const {data:created,error:createError}=await sb.from("panel_release_drafts").insert({release_type:releaseType,version,channel,source_repo:repo,source_ref:ref,source_sha:head,status:"draft",inputs:inputSnapshot,created_by:actor.email||actor.id}).select("*").single();
    if(createError)throw new Error("Unable to create release draft: "+createError.message);
@@ -1117,6 +1199,10 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
    await sb.from("panel_release_drafts").update({last_run_id:runId,last_run_url:runUrl||null,status:"building",updated_at:new Date().toISOString()}).eq("id",draft.id);
  }
  return {ok:true,repo:workerRepo,ref:workerRef,sourceRepo:repo,sourceRef:ref,sourceSha:head,workflow,channel,runId:runId||null,draftId:draft.id,attemptNumber};
+}
+export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null}})=>{
+ const actor=readSession(data.token);
+ return startReleaseCore(data,actor);
 });
 
 
@@ -1316,8 +1402,27 @@ async function requestJson(url:string,init:RequestInit={}){
  }
  return body;
 }
+const githubReadCache=new Map<string,{value:any;expires:number;staleUntil:number}>();
+let githubRateLimitedUntil=0;
 async function github(path:string,init:RequestInit={}){
- return requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+ const method=String(init.method||"GET").toUpperCase();
+ const key=method==="GET"?path:"";
+ const cached=key?githubReadCache.get(key):null;
+ if(cached&&cached.expires>Date.now())return cached.value;
+ if(method==="GET"&&githubRateLimitedUntil>Date.now()){
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
+  throw new Error("GitHub API rate limit is cooling down; live status will resume automatically.");
+ }
+ try{
+  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+  if(key)githubReadCache.set(key,{value,expires:Date.now()+15000,staleUntil:Date.now()+5*60*1000});
+  else githubReadCache.clear();
+  return value;
+ }catch(error:any){
+  if(/rate limit/i.test(String(error?.message||error)))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
+  throw error;
+ }
 }
 async function licenseMaster(path:string,init:RequestInit={}){
  const base=await configuredMasterUrl();
@@ -1367,12 +1472,21 @@ function operationsConfig(system:string){
 function cleanOperationsRun(run:any){
  return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name}:null;
 }
+const operationsGithubTextCache=new Map<string,{value:string;expires:number;staleUntil:number}>();
 async function operationsGithubText(path:string){
+ const cached=operationsGithubTextCache.get(path);
+ if(cached&&cached.expires>Date.now())return cached.value;
  const token=required("ORBITFS_RELEASE_DISPATCH_TOKEN");
  const response=await fetch("https://api.github.com"+path,{headers:{accept:"application/vnd.github+json",authorization:"Bearer "+token,"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28"},cache:"no-store",redirect:"follow"});
  const text=await response.text();
+ if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
  if(response.status===404&&/\/actions\/jobs\/\d+\/logs(?:\?|$)/.test(path))return "";
  if(!response.ok){
+  if(response.status===403||response.status===429){
+   const reset=Number(response.headers.get("x-ratelimit-reset")||0)*1000;
+   githubRateLimitedUntil=Math.max(githubRateLimitedUntil,reset>Date.now()?reset:Date.now()+60000);
+  }
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
   let detail="";
   try{const body=JSON.parse(text);detail=String(body?.message||"")}catch{}
   throw new Error("GitHub API returned HTTP "+response.status+(detail?" · "+detail:"")+" for "+path+".");
@@ -1402,18 +1516,19 @@ function fallbackOperationFailure(job:any,logTail:string){
  return {error:unique[unique.length-1],preceding:[],lines:unique};
 }
 async function operationsRunDetail(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem]){
- const [ciRows,deployRows,quickDeployRows,deploySuccessRows,quickDeploySuccessRows,ref]=await Promise.all([
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+ const [ciRows,deployRows,quickDeployRows,ref]=await Promise.all([
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
  ]);
- const ciRun=ciRows?.workflow_runs?.[0]||null;
- const deployRun=deployRows?.workflow_runs?.[0]||null;
- const quickDeployRun=quickDeployRows?.workflow_runs?.[0]||null;
- const successfulDeployments=[deploySuccessRows?.workflow_runs?.[0],quickDeploySuccessRows?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+ const ciRuns=Array.isArray(ciRows?.workflow_runs)?ciRows.workflow_runs:[];
+ const deployRuns=Array.isArray(deployRows?.workflow_runs)?deployRows.workflow_runs:[];
+ const quickDeployRuns=Array.isArray(quickDeployRows?.workflow_runs)?quickDeployRows.workflow_runs:[];
+ const ciRun=ciRuns[0]||null;
+ const deployRun=deployRuns[0]||null;
+ const quickDeployRun=quickDeployRuns[0]||null;
+ const successfulDeployments=[...deployRuns,...quickDeployRuns].filter((run:any)=>run?.status==="completed"&&run?.conclusion==="success").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
  const deployedRun=successfulDeployments[0]||null;
  const candidates=[ciRun,deployRun,quickDeployRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
  const run=candidates.find((x:any)=>x.status!=="completed")||candidates[0]||null;
@@ -1458,10 +1573,23 @@ async function operationsRunDetail(cfg:(typeof OPERATIONS_REPOS)[OperationsSyste
  return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:cleanOperationsRun(run),ciRun:cleanOperationsRun(ciRun),deployRun:cleanOperationsRun(deployRun),quickDeployRun:cleanOperationsRun(quickDeployRun),latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs,failure,chatPrompt,monitoring:run.name||"Workflow"};
 }
 
+let operationsStateCache:{value:any;expires:number}|null=null;
+
 export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
- const entries=await Promise.all((Object.keys(OPERATIONS_REPOS) as OperationsSystem[]).map(async key=>[key,await operationsRunDetail(OPERATIONS_REPOS[key])] as const));
- return {checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries)};
+ if(operationsStateCache&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
+ const keys:OperationsSystem[]=["licenseManager","billingStore"];
+ try{
+  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(OPERATIONS_REPOS[key])] as const));
+  const value={checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries),stale:false};
+  operationsStateCache={value,expires:Date.now()+12000};
+  return value;
+ }catch(error:any){
+  if(operationsStateCache){
+   return {...operationsStateCache.value,stale:true,warning:"GitHub API is temporarily unavailable or rate-limited; showing the last known Operations state.",checkedAt:new Date().toISOString()};
+  }
+  throw error;
+ }
 });
 
 async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem],workflow:string,startedAt:number){
@@ -1495,6 +1623,7 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
  }
  const startedAt=Date.now();
  await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
+ operationsStateCache=null;
  const run=await findOperationsRun(cfg,workflow,startedAt);
  return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
@@ -1516,12 +1645,14 @@ export const getOperationsScan=createServerFn({method:"POST"}).handler(async({da
  const ref=await github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch));
  const currentSha=String(ref?.object?.sha||"");
  if(!currentSha)throw new Error("Unable to resolve main branch for "+cfg.repo+".");
- const [deploySuccess,ciSuccess]=await Promise.all([
+ const [deploySuccess,quickSuccess]=await Promise.all([
   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
  ]);
- const deployedRun=deploySuccess?.workflow_runs?.[0]||null;
- const baselineSha=deployedRun?.head_sha||ciSuccess?.workflow_runs?.[0]?.head_sha||null;
+ const normalRun=deploySuccess?.workflow_runs?.[0]||null,quickRun=quickSuccess?.workflow_runs?.[0]||null;
+ const deployedRun=[normalRun,quickRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ const baselineSha=deployedRun?.head_sha||null;
+ const baselineSource=deployedRun===quickRun?"quick-deployment":deployedRun?"production-deployment":"no-production-deployment";
  let commits:any[]=[],changedFiles:any[]=[];
  if(baselineSha&&baselineSha!==currentSha){
   commits=await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha);
@@ -1530,6 +1661,10 @@ export const getOperationsScan=createServerFn({method:"POST"}).handler(async({da
   const baseMap=new Map(baseFiles.map((x:any)=>[x.path,x])),currentMap=new Map(currentFiles.map((x:any)=>[x.path,x]));
   for(const path of new Set([...baseMap.keys(),...currentMap.keys()])){const before:any=baseMap.get(path),after:any=currentMap.get(path);if(!before)changedFiles.push({path,status:"added",sha:after.sha,size:after.size??null});else if(!after)changedFiles.push({path,status:"deleted",sha:null,size:null});else if(before.sha!==after.sha||before.mode!==after.mode)changedFiles.push({path,status:"modified",sha:after.sha,size:after.size??null})}
   changedFiles.sort((a,b)=>a.path.localeCompare(b.path));
+ }else if(!baselineSha){
+  const currentCommit=await github("/repos/"+cfg.repo+"/commits/"+currentSha);
+  const currentFiles=await operationsFullTree(cfg.repo,currentCommit.commit.tree.sha);
+  changedFiles=currentFiles.map((item:any)=>({path:item.path,status:"added",sha:item.sha,size:item.size??null})).sort((a:any,b:any)=>a.path.localeCompare(b.path));
  }
- return {key:data.system,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,baselineSha,baselineSource:deployedRun?"production-deployment":"successful-ci",productionCurrent:!!deployedRun&&currentSha===deployedRun.head_sha,updateAvailable:currentSha!==baselineSha,commits:commits.map((c:any)=>({sha:c.sha,html_url:c.html_url,message:String(c.commit?.message||"").split("\n")[0],author:c.commit?.author?.name||c.author?.login||"Unknown",date:c.commit?.author?.date||c.commit?.committer?.date||null})).reverse(),commitCount:commits.length,changedFiles,changedFileCount:changedFiles.length,completeFileScan:true,checkedAt:new Date().toISOString()};
+ return {key:data.system,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,baselineSha,baselineSource,productionCurrent:!!deployedRun&&currentSha===deployedRun.head_sha,updateAvailable:!baselineSha||currentSha!==baselineSha,commits:commits.map((c:any)=>({sha:c.sha,html_url:c.html_url,message:String(c.commit?.message||"").split("\n")[0],author:c.commit?.author?.name||c.author?.login||"Unknown",date:c.commit?.author?.date||c.commit?.committer?.date||null})).reverse(),commitCount:commits.length,changedFiles,changedFileCount:changedFiles.length,completeFileScan:true,checkedAt:new Date().toISOString()};
 });

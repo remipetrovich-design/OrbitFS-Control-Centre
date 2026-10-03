@@ -8,6 +8,17 @@ const ACCESS_TTL_SECONDS=60*60;
 const REFRESH_TTL_SECONDS=60*60*24*30;
 const CODE_TTL_SECONDS=5*60;
 
+async function oauthPolicy(){
+ const defaults={oauth_dcr_enabled:true,oauth_cimd_enabled:true,oauth_refresh_tokens_enabled:true};
+ const {data,error}=await db().from("dev_mcp_settings").select("*").eq("id",true).maybeSingle();
+ if(error||!data)return defaults;
+ return {
+  oauth_dcr_enabled:data.oauth_dcr_enabled!==false,
+  oauth_cimd_enabled:data.oauth_cimd_enabled!==false,
+  oauth_refresh_tokens_enabled:data.oauth_refresh_tokens_enabled!==false
+ };
+}
+
 function required(name:string){const value=process.env[name];if(!value)throw new Error("Missing server environment variable: "+name);return value}
 function db(){return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}})}
 function origin(){return String(process.env.DEV_MCP_PUBLIC_ORIGIN||process.env.APP_URL||DEFAULT_ORIGIN).replace(/\/+$/,"")}
@@ -46,15 +57,17 @@ export function protectedResourceMetadata(){
   resource_documentation:origin()+"/docs/dev-mcp",
  };
 }
-export function authorizationServerMetadata(){
+export async function authorizationServerMetadata(){
+ const policy=await oauthPolicy();
  return {
   issuer:oauthIssuer(),
   authorization_endpoint:origin()+"/oauth/authorize",
   token_endpoint:origin()+"/oauth/token",
-  registration_endpoint:origin()+"/oauth/register",
+  ...(policy.oauth_dcr_enabled?{registration_endpoint:origin()+"/oauth/register"}:{}),
+  client_id_metadata_document_supported:policy.oauth_cimd_enabled,
   authorization_response_iss_parameter_supported:true,
   token_endpoint_auth_methods_supported:["none"],
-  grant_types_supported:["authorization_code","refresh_token"],
+  grant_types_supported:policy.oauth_refresh_tokens_enabled?["authorization_code","refresh_token"]:["authorization_code"],
   response_types_supported:["code"],
   code_challenge_methods_supported:["S256"],
   scopes_supported:[...SUPPORTED_SCOPES],
@@ -62,12 +75,16 @@ export function authorizationServerMetadata(){
 }
 
 export async function registerOAuthClient(body:any){
+ const policy=await oauthPolicy();
+ if(!policy.oauth_dcr_enabled)throw new Error("Dynamic Client Registration is disabled");
  const redirectUris=Array.isArray(body?.redirect_uris)?body.redirect_uris.map(String):[];
  if(!redirectUris.length||redirectUris.some(uri=>!allowedRedirect(uri)))throw new Error("Invalid or unsupported redirect_uri");
  const authMethod=String(body?.token_endpoint_auth_method||"none");
  if(authMethod!=="none")throw new Error("Only public OAuth clients are supported");
- const grantTypes=Array.isArray(body?.grant_types)?body.grant_types.map(String):["authorization_code","refresh_token"];
- if(grantTypes.some(x=>!["authorization_code","refresh_token"].includes(x)))throw new Error("Unsupported grant type");
+ const defaultGrants=policy.oauth_refresh_tokens_enabled?["authorization_code","refresh_token"]:["authorization_code"];
+ const grantTypes=Array.isArray(body?.grant_types)?body.grant_types.map(String):defaultGrants;
+ const allowedGrants=policy.oauth_refresh_tokens_enabled?["authorization_code","refresh_token"]:["authorization_code"];
+ if(grantTypes.some(x=>!allowedGrants.includes(x)))throw new Error("Unsupported grant type");
  const responseTypes=Array.isArray(body?.response_types)?body.response_types.map(String):["code"];
  if(responseTypes.some(x=>x!=="code"))throw new Error("Unsupported response type");
  const clientId=randomToken("odmcp_");
@@ -78,13 +95,51 @@ export async function registerOAuthClient(body:any){
   token_endpoint_auth_method:"none",
   grant_types:grantTypes,
   response_types:responseTypes,
+  registration_method:"dcr",
  };
  const {error}=await db().from("dev_oauth_clients").insert(row);
  if(error)throw new Error("Unable to register OAuth client");
  return {...row,client_id_issued_at:Math.floor(Date.now()/1000)};
 }
-
+function cimdUrlAllowed(value:string){
+ try{
+  const u=new URL(value);
+  if(u.protocol!=="https:"||u.username||u.password||u.hash||u.search||u.pathname==="/"||!u.pathname)return false;
+  const hosts=String(process.env.DEV_MCP_OAUTH_CIMD_HOSTS||"chatgpt.com,openai.com").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);
+  return hosts.some(host=>u.hostname===host||u.hostname.endsWith("."+host));
+ }catch{return false}
+}
+async function resolveCimdClient(clientId:string){
+ const policy=await oauthPolicy();
+ if(!policy.oauth_cimd_enabled)throw new Error("Client ID Metadata Documents are disabled");
+ if(!cimdUrlAllowed(clientId))throw new Error("Unsupported CIMD client_id");
+ const response=await fetch(clientId,{headers:{accept:"application/json"},redirect:"error",cache:"no-store",signal:AbortSignal.timeout(5000)});
+ if(!response.ok)throw new Error("Unable to fetch CIMD client metadata");
+ const doc:any=await response.json().catch(()=>null);
+ if(!doc||String(doc.client_id||"")!==clientId)throw new Error("CIMD client_id does not match metadata URL");
+ const redirectUris=Array.isArray(doc.redirect_uris)?doc.redirect_uris.map(String):[];
+ if(!redirectUris.length||redirectUris.some(uri=>!allowedRedirect(uri)))throw new Error("CIMD redirect_uris are not allowed");
+ const grantTypes=Array.isArray(doc.grant_types)?doc.grant_types.map(String):["authorization_code"];
+ if(!grantTypes.includes("authorization_code"))throw new Error("CIMD client must support authorization_code");
+ const responseTypes=Array.isArray(doc.response_types)?doc.response_types.map(String):["code"];
+ if(!responseTypes.includes("code"))throw new Error("CIMD client must support code response type");
+ const methods=Array.isArray(doc.token_endpoint_auth_methods_supported)?doc.token_endpoint_auth_methods_supported.map(String):[String(doc.token_endpoint_auth_method||"none")];
+ if(!methods.includes("none"))throw new Error("This Dev MCP currently requires CIMD public-client token exchange");
+ const row={
+  client_id:clientId,
+  client_name:String(doc.client_name||"OpenAI MCP Client").slice(0,160),
+  redirect_uris:redirectUris,
+  token_endpoint_auth_method:"none",
+  grant_types:grantTypes,
+  response_types:responseTypes,
+  registration_method:"cimd"
+ };
+ const {error}=await db().from("dev_oauth_clients").upsert(row,{onConflict:"client_id"});
+ if(error)throw new Error("Unable to cache CIMD client");
+ return row;
+}
 export async function getOAuthClient(clientId:string){
+ if(/^https:\/\//i.test(clientId))return resolveCimdClient(clientId);
  const {data,error}=await db().from("dev_oauth_clients").select("*").eq("client_id",clientId).maybeSingle();
  if(error||!data)throw new Error("Unknown OAuth client");
  return data;
@@ -120,15 +175,16 @@ export async function authorizeOwner(input:Record<string,string>,email:string,pa
 }
 
 async function issueTokens(clientId:string,userId:string,scopes:string[],resource:string){
- const access=randomToken("oda_"),refresh=randomToken("odr_");
+ const policy=await oauthPolicy();
+ const access=randomToken("oda_"),refresh=policy.oauth_refresh_tokens_enabled?randomToken("odr_"):"";
  const now=Date.now();
- const rows=[
+ const rows:any[]=[
   {token_hash:hash(access),token_type:"access",client_id:clientId,user_id:userId,scopes,resource,expires_at:new Date(now+ACCESS_TTL_SECONDS*1000).toISOString()},
-  {token_hash:hash(refresh),token_type:"refresh",client_id:clientId,user_id:userId,scopes,resource,expires_at:new Date(now+REFRESH_TTL_SECONDS*1000).toISOString()},
  ];
+ if(refresh)rows.push({token_hash:hash(refresh),token_type:"refresh",client_id:clientId,user_id:userId,scopes,resource,expires_at:new Date(now+REFRESH_TTL_SECONDS*1000).toISOString()});
  const {error}=await db().from("dev_oauth_tokens").insert(rows);
  if(error)throw new Error("Unable to issue OAuth tokens");
- return {access_token:access,token_type:"Bearer",expires_in:ACCESS_TTL_SECONDS,refresh_token:refresh,scope:scopes.join(" ")};
+ return {access_token:access,token_type:"Bearer",expires_in:ACCESS_TTL_SECONDS,...(refresh?{refresh_token:refresh}:{}),scope:scopes.join(" ")};
 }
 
 export async function exchangeOAuthToken(form:Record<string,string>){
@@ -152,6 +208,7 @@ export async function exchangeOAuthToken(form:Record<string,string>){
  }
 
  if(grant==="refresh_token"){
+  const policy=await oauthPolicy();if(!policy.oauth_refresh_tokens_enabled)throw new Error("Refresh tokens are disabled");
   const refresh=String(form.refresh_token||"");
   if(!refresh)throw new Error("refresh_token is required");
   const refreshHash=hash(refresh);
@@ -174,6 +231,39 @@ export async function authenticateMcpOAuth(request:Request,requiredScopes:string
  const {data:user,error:userError}=await db().from("users").select("id,email,display_name,role,status").eq("id",token.user_id).maybeSingle();
  if(userError||!user||user.status!=="active"||String(user.role).toLowerCase()!=="owner")return null;
  return {valid:true,scopes,clientId:token.client_id,user:{id:user.id,email:user.email,display_name:user.display_name,role:user.role}};
+}
+
+export async function oauthAdminState(){
+ const [{data:clients,error:clientError},{data:tokens,error:tokenError}]=await Promise.all([
+  db().from("dev_oauth_clients").select("*").order("created_at",{ascending:false}),
+  db().from("dev_oauth_tokens").select("client_id,token_type,scopes,expires_at,revoked_at,created_at").order("created_at",{ascending:false}).limit(500)
+ ]);
+ if(clientError||tokenError)throw new Error("Unable to load OAuth connections");
+ const now=Date.now(),rows=clients||[],all=tokens||[];
+ return {
+  clients:rows.map((client:any)=>{
+   const mine=all.filter((t:any)=>t.client_id===client.client_id);
+   const active=mine.filter((t:any)=>!t.revoked_at&&new Date(t.expires_at).getTime()>now);
+   return {...client,activeAccess:active.filter((t:any)=>t.token_type==="access").length,activeRefresh:active.filter((t:any)=>t.token_type==="refresh").length,lastIssuedAt:mine[0]?.created_at||null,lastExpiresAt:active.map((t:any)=>t.expires_at).sort().at(-1)||null};
+  }),
+  activeTokens:all.filter((t:any)=>!t.revoked_at&&new Date(t.expires_at).getTime()>now).length
+ };
+}
+export async function revokeOAuthConnection(input:{clientId?:string;removeClient?:boolean;all?:boolean}){
+ const now=new Date().toISOString();
+ if(input.all){
+  const {error}=await db().from("dev_oauth_tokens").update({revoked_at:now}).is("revoked_at",null);
+  if(error)throw new Error("Unable to revoke OAuth sessions");
+  return {ok:true,all:true};
+ }
+ const clientId=String(input.clientId||"").trim();if(!clientId)throw new Error("clientId is required");
+ const {error}=await db().from("dev_oauth_tokens").update({revoked_at:now}).eq("client_id",clientId).is("revoked_at",null);
+ if(error)throw new Error("Unable to revoke OAuth sessions");
+ if(input.removeClient){
+  const {error:deleteError}=await db().from("dev_oauth_clients").delete().eq("client_id",clientId);
+  if(deleteError)throw new Error("Unable to remove OAuth client");
+ }
+ return {ok:true,clientId,removed:Boolean(input.removeClient)};
 }
 
 export function oauthAuthorizeHtml(input:Record<string,string>,clientName:string,errorMessage=""){

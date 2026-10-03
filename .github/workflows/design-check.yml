@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - design/orbitfs-control-redesign
   workflow_dispatch:
 
 permissions:
@@ -20,12 +19,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: package.json
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - name: Install
-        run: npm install --ignore-scripts
+        run: bun install --frozen-lockfile
       - name: Typecheck
         continue-on-error: true
-        run: npx tsc --noEmit
+        run: bun x tsc --noEmit
       - name: Build
-        run: npm run build
+        env:
+          VERCEL: "1"
+          ORBITFS_VERCEL_BUILD: "1"
+        run: bun run build

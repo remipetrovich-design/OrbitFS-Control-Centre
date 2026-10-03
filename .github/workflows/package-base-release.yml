@@ -213,6 +213,39 @@ jobs:
           }
           echo "Customer DB snapshot is current: $migration_count_packaged migrations, latest $packaged_latest_migration."
 
+      - name: Register Base database package candidate
+        id: database-package
+        working-directory: base-source
+        shell: bash
+        env:
+          LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$LICENSE_MASTER_API_TOKEN" || { echo "::error::Missing LICENSE_MASTER_API_TOKEN in Dev Panel repository secrets"; exit 1; }
+          node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
+          test -f tools/build-database-package.mjs || { echo "::error::Base source is missing tools/build-database-package.mjs"; exit 1; }
+          schema_version="$(jq -r '.schemaVersion // empty' release-package/database-schema.json)"
+          test -n "$schema_version" || { echo "::error::Generated Base database schema version is missing."; exit 1; }
+          node tools/build-database-package.mjs \
+            --commit "$SOURCE_SHA" \
+            --schema-version "$schema_version" \
+            --snapshot supabase/customer-schema.sql \
+            --metadata release-package/database-schema.json \
+            --output release-package/base-database-package.json
+          test -s release-package/base-database-package.json
+          response="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages" \
+            -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @release-package/base-database-package.json)"
+          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceCommit:.package.sourceCommit}' <<<"$response")"
+          test "$(jq -r '.component' <<<"$reference")" = "base" || { echo "::error::License Manager returned a non-Base database package."; exit 1; }
+          test "$(jq -r '.sourceCommit' <<<"$reference")" = "$SOURCE_SHA" || { echo "::error::Base database package source commit does not match the release source."; exit 1; }
+          test "$(jq -r '.databaseSchemaVersion' <<<"$reference")" = "$schema_version" || { echo "::error::Base database package schema version does not match the release schema version."; exit 1; }
+          jq -e '.id|type=="string" and length>0' <<<"$reference" >/dev/null
+          jq -e '.sha256|test("^[a-f0-9]{64}$")' <<<"$reference" >/dev/null
+          echo "reference=$reference" >> "$GITHUB_OUTPUT"
+
       - name: Build release information
         working-directory: base-source
         shell: bash
@@ -279,6 +312,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          DATABASE_PACKAGE_REFERENCE: ${{ steps.database-package.outputs.reference }}
         run: |
           set -euo pipefail
           node - <<'NODE'
@@ -333,6 +367,10 @@ jobs:
             releaseNotes:fs.readFileSync("release-package/changelog.md","utf8"),
             releaseInfo,
             components:["base"],
+            databasePackages:{
+              format:"orbitfs-database-package-set-v1",
+              packages:[JSON.parse(process.env.DATABASE_PACKAGE_REFERENCE)]
+            },
             projectSettings:{framework:"sveltekit",installCommand:"npm ci",buildCommand:"npm run build"},
             files
           };
@@ -393,7 +431,7 @@ jobs:
             --arg checksum "$ARTIFACT_SHA256" \
             --arg notes "$NOTES" \
             --argjson artifact_run_id "$GITHUB_RUN_ID" \
-            --argjson package_manifest "$(jq -c '{schemaVersion,format,databaseSchemaVersion,databaseSchemaSha256,databaseSchemaPath,databaseMigrationCount,databaseLatestMigration,version,sourceCommit,fileCount,title,description,releaseInfo,components,projectSettings}' release-package/manifest.json)" \
+            --argjson package_manifest "$(jq -c '{schemaVersion,format,databaseSchemaVersion,databaseSchemaSha256,databaseSchemaPath,databaseMigrationCount,databaseLatestMigration,version,sourceCommit,fileCount,title,description,releaseInfo,components,databasePackages,projectSettings}' release-package/manifest.json)" \
             --argjson changed_files "$(printf '%s' "$CONTROL_CHANGED_FILES" | jq -c '.')" \
             --argjson release_record "$(printf '%s' "$CONTROL_RELEASE_RECORD" | jq -c '.')" \
             '{product:$product,release_type:$release_type,version:$version,channel:$channel,source_repo:$source_repo,source_ref:$source_ref,source_sha:$source_sha,artifact_repo:$artifact_repo,artifact_name:$artifact_name,checksum:$checksum,artifact_run_id:$artifact_run_id,notes:$notes,manifest:($package_manifest + {releaseType:"base",product:"orbitfs_base",channel:$channel,artifactTag:$artifact_tag,changedFiles:$changed_files,releaseRecord:$release_record})}' > release-package/license-master-payload.json

@@ -50,6 +50,9 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
+        <pre className="mx-auto mt-3 max-w-md whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 text-left text-[11px] text-muted-foreground">
+          {String(error?.message || "Unknown client error")}
+        </pre>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
