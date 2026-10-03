@@ -1,14 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
+import {activeGithubProfile,githubToken} from "@/lib/github-profile";
 
-const BASE_REPO=process.env.BASE_RELEASE_REPO||"lucaskerim123/V1-vercel-base";
-const BASE_REF=process.env.BASE_RELEASE_REF||"base-release";
-const BASE_WORKER_REPO=process.env.BASE_RELEASE_WORKER_REPO||"lucaskerim123/Dev-panel";
-const BASE_WORKER_REF=process.env.BASE_RELEASE_WORKER_REF||"main";
-const ENGINE_REPO=process.env.ENGINE_RELEASE_REPO||"lucaskerim123/V1-vercel-engine";
-const ENGINE_REF=process.env.ENGINE_RELEASE_REF||"UPDATE_RELEASE";
-const ENGINE_BASELINE_REF=process.env.ENGINE_BASELINE_REF||"main";
+const GITHUB_PROFILE=activeGithubProfile();
+const BASE_REPO=GITHUB_PROFILE.base.repo;
+const BASE_REF=GITHUB_PROFILE.base.releaseRef;
+const BASE_WORKER_REPO=GITHUB_PROFILE.devPanel.repo;
+const BASE_WORKER_REF=GITHUB_PROFILE.devPanel.branch;
+const ENGINE_REPO=GITHUB_PROFILE.engine.repo;
+const ENGINE_REF=GITHUB_PROFILE.engine.releaseRef;
+const ENGINE_BASELINE_REF=GITHUB_PROFILE.engine.baselineRef;
 const BASE_WORKFLOW=process.env.BASE_RELEASE_WORKER_WORKFLOW||"package-base-release.yml";
 const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-release.yml";
 
@@ -1414,7 +1416,7 @@ async function github(path:string,init:RequestInit={}){
   throw new Error("GitHub API rate limit is cooling down; live status will resume automatically.");
  }
  try{
-  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${githubToken()}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
   if(key)githubReadCache.set(key,{value,expires:Date.now()+15000,staleUntil:Date.now()+5*60*1000});
   else githubReadCache.clear();
   return value;
@@ -1476,7 +1478,7 @@ const operationsGithubTextCache=new Map<string,{value:string;expires:number;stal
 async function operationsGithubText(path:string){
  const cached=operationsGithubTextCache.get(path);
  if(cached&&cached.expires>Date.now())return cached.value;
- const token=required("ORBITFS_RELEASE_DISPATCH_TOKEN");
+ const token=githubToken();
  const response=await fetch("https://api.github.com"+path,{headers:{accept:"application/vnd.github+json",authorization:"Bearer "+token,"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28"},cache:"no-store",redirect:"follow"});
  const text=await response.text();
  if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
