@@ -84,10 +84,15 @@ export function ReleaseWorkspace(p:any){
  },[promotionRun?.runId,promotionRun?.sourceSha,promotionRun?.completed,promotionRun?.conclusion,base,p.session.token,p.type,branchSync?.releaseRef,p.baseline?.ref]);
  // A historical run must not hijack a new wizard or an unrelated draft.
  // New builds use the version/channel of the run that this page actually started.
- const currentRun=p.run&&!selected&&(
-   activeDraft?p.run.draftId===activeDraft.id:
-   stage>=2&&Boolean(p.version)&&String(p.runVersion||"")===String(p.version)&&
-   String(p.runChannel||"").toLowerCase()===String(p.channel||"").toLowerCase()
+ const currentRun=p.run&&!selected&&stage>=2&&(
+   activeDraft
+    ? (
+      p.run.draftId===activeDraft.id||
+      (String(p.runVersion||"")===String(activeDraft.version||p.version||"")&&
+       String(p.runChannel||"").toLowerCase()===String(activeDraft.channel||p.channel||"").toLowerCase())
+     )
+    : Boolean(p.version)&&String(p.runVersion||"")===String(p.version)&&
+      String(p.runChannel||"").toLowerCase()===String(p.channel||"").toLowerCase()
  )?p.run:null;
  const matchingHandoff=p.handoff&&currentRun&&
    String(p.handoff.version||"")===String(p.version||"")&&
