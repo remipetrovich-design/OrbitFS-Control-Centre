@@ -15,7 +15,7 @@ on:
       source_repo:
         description: Authoritative Base source repository
         required: true
-        default: lucaskerim123/V1-vercel-base
+        default: remipetrovich-design/OrbitFS-Base-System
         type: string
       source_ref:
         description: Authoritative Base source ref
@@ -80,13 +80,13 @@ jobs:
           SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
-          test "$SOURCE_REPO" = "lucaskerim123/V1-vercel-base" || { echo "::error::Base packaging is locked to lucaskerim123/V1-vercel-base."; exit 1; }
+          test "$SOURCE_REPO" = "remipetrovich-design/OrbitFS-Base-System" || { echo "::error::Base packaging is locked to remipetrovich-design/OrbitFS-Base-System."; exit 1; }
           test "$SOURCE_REF" = "base-release" || { echo "::error::Base packaging is locked to base-release."; exit 1; }
 
       - name: Checkout Base release branch
         uses: actions/checkout@v4
         with:
-          repository: lucaskerim123/V1-vercel-base
+          repository: remipetrovich-design/OrbitFS-Base-System
           ref: base-release
           token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
           fetch-depth: 0
@@ -140,8 +140,8 @@ jobs:
           SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
-          test "$SOURCE_REPO" = "lucaskerim123/V1-vercel-base" || {
-            echo "::error::Base packaging is locked to lucaskerim123/V1-vercel-base."
+          test "$SOURCE_REPO" = "remipetrovich-design/OrbitFS-Base-System" || {
+            echo "::error::Base packaging is locked to remipetrovich-design/OrbitFS-Base-System."
             exit 1
           }
           test "$SOURCE_REF" = "base-release" || {
@@ -152,7 +152,7 @@ jobs:
       - name: Checkout Base release branch
         uses: actions/checkout@v4
         with:
-          repository: lucaskerim123/V1-vercel-base
+          repository: remipetrovich-design/OrbitFS-Base-System
           ref: base-release
           token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
           fetch-depth: 0
@@ -172,7 +172,7 @@ jobs:
             echo "::error::base-release moved after Dev Panel inspection. Expected $EXPECTED_SHA, current head is $ACTUAL_SHA. Refresh the Base release in Dev Panel and package again."
             exit 1
           }
-          echo "Confirmed Base source: lucaskerim123/V1-vercel-base@base-release ($ACTUAL_SHA)"
+          echo "Confirmed Base source: remipetrovich-design/OrbitFS-Base-System@base-release ($ACTUAL_SHA)"
 
       - name: Setup Node
         uses: actions/setup-node@v4
