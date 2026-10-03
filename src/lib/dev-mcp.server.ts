@@ -3,7 +3,7 @@ import {createServerFn} from "@tanstack/react-start";
 import crypto from "node:crypto";
 import {inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
 import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
-import {activeGithubProfile,activeGithubProfileName,clearGithubProfileCache,githubToken,githubProfiles} from "@/lib/github-profile";
+import {activeGithubProfile,activeGithubProfileName,githubToken,githubProfiles} from "@/lib/github-profile";
 
 type ReleaseTarget="base"|"engine";
 type ServiceTarget="license_manager"|"billing_store";
@@ -22,7 +22,7 @@ export const DEFAULT_MCP_SETTINGS={
 
 function required(name:string){const value=process.env[name];if(!value)throw new Error("Missing server environment variable: "+name);return value}
 function db(){return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}})}
-function compactSettings(row:any){return {...DEFAULT_MCP_SETTINGS,...Object.fromEntries(Object.keys(DEFAULT_MCP_SETTINGS).filter(k=>row?.[k]!==undefined).map(k=>[k,Boolean(row[k])])),github_profile:String(row?.github_profile||"primary")==="fallback"?"fallback":"primary"}}
+function compactSettings(row:any){return {...DEFAULT_MCP_SETTINGS,...Object.fromEntries(Object.keys(DEFAULT_MCP_SETTINGS).filter(k=>row?.[k]!==undefined).map(k=>[k,Boolean(row[k])]))}}
 export async function getMcpSettings(){
  try{
   const {data,error}=await db().from("dev_mcp_settings").select("*").eq("id",true).maybeSingle();
@@ -34,13 +34,12 @@ export async function getMcpSettings(){
  }
 }
 export async function updateMcpSettings(actor:any,patch:Record<string,unknown>){
+ if(Object.prototype.hasOwnProperty.call(patch||{},"github_profile"))throw new Error("GitHub profile is controlled only from Dev Panel Configuration and cannot be changed through MCP settings.");
  const clean:any={updated_by:actor.id,updated_at:new Date().toISOString()};
  for(const key of Object.keys(DEFAULT_MCP_SETTINGS))if(typeof patch?.[key]==="boolean")clean[key]=patch[key];
- if(patch?.github_profile==="primary"||patch?.github_profile==="fallback")clean.github_profile=patch.github_profile;
  if(Object.keys(clean).length<=2)throw new Error("No valid MCP settings supplied");
  const {data,error}=await db().from("dev_mcp_settings").upsert({id:true,...clean},{onConflict:"id"}).select("*").single();
  if(error)throw new Error("Unable to update MCP settings: "+String(error.message||error.code||"storage error"));
- if(clean.github_profile)clearGithubProfileCache();
  return {...compactSettings(data),storageReady:true,storageError:null};
 }
 export const getMcpSettingsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
