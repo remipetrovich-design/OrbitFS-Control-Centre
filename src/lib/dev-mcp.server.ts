@@ -3,20 +3,11 @@ import {createServerFn} from "@tanstack/react-start";
 import crypto from "node:crypto";
 import {inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
 import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
-import {activeGithubProfile,activeGithubProfileName,githubToken,githubProfiles} from "@/lib/github-profile";
+import {activeGithubProfile,activeGithubProfileName,clearGithubProfileCache,githubToken,githubProfiles} from "@/lib/github-profile";
 
 type ReleaseTarget="base"|"engine";
 type ServiceTarget="license_manager"|"billing_store";
 
-const GITHUB_PROFILE=activeGithubProfile();
-const RELEASE_TARGETS={
- base:{key:"base" as const,label:"V1 Base",repo:GITHUB_PROFILE.base.repo,branch:GITHUB_PROFILE.base.branch,releaseRef:GITHUB_PROFILE.base.releaseRef,workflow:"sync-release-branch.yml"},
- engine:{key:"engine" as const,label:"V1 Engine",repo:GITHUB_PROFILE.engine.repo,branch:GITHUB_PROFILE.engine.branch,releaseRef:GITHUB_PROFILE.engine.releaseRef,workflow:"sync-release-branch.yml"},
-};
-const SERVICE_TARGETS={
- license_manager:{key:"license_manager" as const,label:"Custom License Manager",repo:GITHUB_PROFILE.licenseManager.repo,branch:GITHUB_PROFILE.licenseManager.branch,scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml"},
- billing_store:{key:"billing_store" as const,label:"V2 Billing Store",repo:GITHUB_PROFILE.billingStore.repo,branch:GITHUB_PROFILE.billingStore.branch,scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml"},
-};
 export const DEFAULT_MCP_SETTINGS={
  enabled:true,read_only_mode:false,allow_mutations:true,
  expose_base:true,expose_engine:true,expose_license_manager:true,expose_billing_store:true,
@@ -31,7 +22,7 @@ export const DEFAULT_MCP_SETTINGS={
 
 function required(name:string){const value=process.env[name];if(!value)throw new Error("Missing server environment variable: "+name);return value}
 function db(){return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}})}
-function compactSettings(row:any){return {...DEFAULT_MCP_SETTINGS,...Object.fromEntries(Object.keys(DEFAULT_MCP_SETTINGS).filter(k=>row?.[k]!==undefined).map(k=>[k,Boolean(row[k])]))}}
+function compactSettings(row:any){return {...DEFAULT_MCP_SETTINGS,...Object.fromEntries(Object.keys(DEFAULT_MCP_SETTINGS).filter(k=>row?.[k]!==undefined).map(k=>[k,Boolean(row[k])])),github_profile:String(row?.github_profile||"primary")==="fallback"?"fallback":"primary"}}
 export async function getMcpSettings(){
  try{
   const {data,error}=await db().from("dev_mcp_settings").select("*").eq("id",true).maybeSingle();
@@ -45,15 +36,17 @@ export async function getMcpSettings(){
 export async function updateMcpSettings(actor:any,patch:Record<string,unknown>){
  const clean:any={updated_by:actor.id,updated_at:new Date().toISOString()};
  for(const key of Object.keys(DEFAULT_MCP_SETTINGS))if(typeof patch?.[key]==="boolean")clean[key]=patch[key];
+ if(patch?.github_profile==="primary"||patch?.github_profile==="fallback")clean.github_profile=patch.github_profile;
  if(Object.keys(clean).length<=2)throw new Error("No valid MCP settings supplied");
  const {data,error}=await db().from("dev_mcp_settings").upsert({id:true,...clean},{onConflict:"id"}).select("*").single();
  if(error)throw new Error("Unable to update MCP settings: "+String(error.message||error.code||"storage error"));
+ if(clean.github_profile)clearGithubProfileCache();
  return {...compactSettings(data),storageReady:true,storageError:null};
 }
 export const getMcpSettingsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
  const origin=String(process.env.DEV_MCP_PUBLIC_ORIGIN||process.env.APP_URL||"https://dev.incendiarynetworks.cc").replace(/\/+$/,"");
- return {settings:await getMcpSettings(),github:{active:activeGithubProfileName(),profiles:githubProfiles()},runtime:{
+ return {settings:await getMcpSettings(),github:{active:await activeGithubProfileName(),profiles:await githubProfiles()},runtime:{
   endpoint:origin+"/devmcp",oauth:true,ownerOnly:true,pkce:"S256",resourceBinding:true,
   protectedResourceMetadata:origin+"/.well-known/oauth-protected-resource",
   authorizationMetadata:origin+"/.well-known/oauth-authorization-server",
@@ -82,7 +75,7 @@ async function github(path:string,init:RequestInit={}){
   if(cached&&cached.staleUntil>Date.now())return cached.value;
   throw new Error("GitHub API rate limit is cooling down; retry after the reset window.");
  }
- const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+githubToken(),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
+ const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+await githubToken(),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
  const text=await response.text();let body:any=null;try{body=text?JSON.parse(text):null}catch{}
  if(!response.ok){
   if(response.status===403||response.status===429){
@@ -105,11 +98,21 @@ async function findRun(repo:string,workflow:string,branch:string,startedAt:numbe
  }
  return null;
 }
-function releaseCfg(target:ReleaseTarget){return RELEASE_TARGETS[target]}
-function serviceCfg(target:ServiceTarget){return SERVICE_TARGETS[target]}
+async function releaseCfg(target:ReleaseTarget){
+ const profile=await activeGithubProfile();
+ return target==="base"
+  ?{key:"base" as const,label:"V1 Base",repo:profile.base.repo,branch:profile.base.branch,releaseRef:profile.base.releaseRef,workflow:"sync-release-branch.yml"}
+  :{key:"engine" as const,label:"V1 Engine",repo:profile.engine.repo,branch:profile.engine.branch,releaseRef:profile.engine.releaseRef,workflow:"sync-release-branch.yml"};
+}
+async function serviceCfg(target:ServiceTarget){
+ const profile=await activeGithubProfile();
+ return target==="license_manager"
+  ?{key:"license_manager" as const,label:"Custom License Manager",repo:profile.licenseManager.repo,branch:profile.licenseManager.branch,scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml"}
+  :{key:"billing_store" as const,label:"V2 Billing Store",repo:profile.billingStore.repo,branch:profile.billingStore.branch,scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml"};
+}
 
 export async function releaseBranchState(target:ReleaseTarget){
- const cfg=releaseCfg(target);
+ const cfg=await releaseCfg(target);
  const [mainRef,releaseRef,runs]=await Promise.all([
   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.releaseRef)).catch(()=>null),
@@ -161,7 +164,7 @@ export async function prepareRelease(target:"base"|"engine"|"both"){
   if(!settings.expose_base||!settings.expose_engine)throw new Error("Base and Engine must both be enabled to prepare both");
  }
  return {ok:true,target,results:await Promise.all(targets.map(async t=>{
-  const before=await releaseBranchState(t),cfg=releaseCfg(t);
+  const before=await releaseBranchState(t),cfg=await releaseCfg(t);
   if(before.preparedCurrent)return {...before,queued:false,message:cfg.label+" release branch is already current."};
   const startedAt=Date.now();
   await github("/repos/"+cfg.repo+"/actions/workflows/"+encodeURIComponent(cfg.workflow)+"/dispatches",{method:"POST",body:JSON.stringify({ref:cfg.branch,inputs:{confirmation:"PROMOTE"}})});
@@ -171,7 +174,7 @@ export async function prepareRelease(target:"base"|"engine"|"both"){
 }
 
 async function serviceState(target:ServiceTarget){
- const cfg=serviceCfg(target);
+ const cfg=await serviceCfg(target);
  const [ref,scan,deploy,quick]=await Promise.all([
   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
   github("/repos/"+cfg.repo+"/actions/workflows/"+encodeURIComponent(cfg.scan)+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=8"),
@@ -191,7 +194,7 @@ export async function deployService(target:ServiceTarget,action:"status"|"scan"|
  if(action==="deploy"||action==="redeploy")requireSetting(mutationSettings,"allow_service_deploy","Service deployments are disabled");
  if(action==="quick_deploy")requireSetting(mutationSettings,"allow_quick_deploy","Quick Deploy is disabled");
  if(action==="cancel"||action==="retry")requireSetting(mutationSettings,"allow_workflow_control","Workflow cancel/retry is disabled");
- const cfg=serviceCfg(target);
+ const cfg=await serviceCfg(target);
  if(action==="cancel"||action==="retry"){
   const runId=Number(options.run_id||0);if(!runId)throw new Error("run_id is required");
   await github("/repos/"+cfg.repo+"/actions/runs/"+runId+(action==="cancel"?"/cancel":"/rerun"),{method:"POST",body:"{}"});
@@ -397,7 +400,7 @@ async function githubFileSha256(repo:string,path:string,ref:string){
  return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 async function releaseDatabaseInspection(target:ReleaseTarget,inspection:any){
- const repo=String(inspection?.repo||releaseCfg(target).repo),ref=String(inspection?.head||"");
+ const repo=String(inspection?.repo||(await releaseCfg(target)).repo),ref=String(inspection?.head||"");
  const files=Array.isArray(inspection?.files)?inspection.files:[];
  const migrations:any[]=[];
  const invalid:any[]=[];
@@ -594,7 +597,7 @@ export async function updateCommand(input:{action:string;identity:string;install
 
 export async function workflowDetail(input:{target:"base"|"engine"|"license_manager"|"billing_store";run_id?:number}){
  await assertTargetEnabled(input.target);
- const cfg:any=input.target==="base"||input.target==="engine"?releaseCfg(input.target):serviceCfg(input.target as ServiceTarget);
+ const cfg:any=input.target==="base"||input.target==="engine"?await releaseCfg(input.target):await serviceCfg(input.target as ServiceTarget);
  let runId=Number(input.run_id||0);
  if(!runId){
   const workflows=input.target==="base"||input.target==="engine"?[cfg.workflow]:[cfg.scan,cfg.deploy,cfg.quick];
