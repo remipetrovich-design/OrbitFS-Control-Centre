@@ -15,10 +15,11 @@ export const Route=createFileRoute("/api/github-profile")({
   handlers:{
    GET:async()=>{
     try{
-     const {data,error}=await service().from("dev_panel_settings").select("github_profile,updated_at").eq("id",true).maybeSingle();
+     const {data,error}=await service().from("dev_panel_settings").select("github_profile,updated_at").eq("id",true).single();
      if(error)throw error;
-     const profile=String(data?.github_profile||"primary")==="fallback"?"fallback":"primary";
-     return Response.json({profile,updatedAt:data?.updated_at||null},{headers:{"cache-control":"no-store, no-cache, must-revalidate"}});
+     const raw=String(data?.github_profile||"").trim().toLowerCase();
+     if(raw!=="primary"&&raw!=="fallback")throw new Error("Persisted GitHub profile is invalid or missing.");
+     return Response.json({profile:raw,updatedAt:data?.updated_at||null},{headers:{"cache-control":"no-store, no-cache, must-revalidate"}});
     }catch(error){
      return Response.json({error:error instanceof Error?error.message:"Unable to resolve GitHub profile"},{status:500,headers:{"cache-control":"no-store"}});
     }
