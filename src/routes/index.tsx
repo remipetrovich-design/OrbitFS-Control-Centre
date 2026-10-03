@@ -16,7 +16,8 @@ import {
   updatePanelUser, createAccessGroup, updateAccessGroup, getControlState,
   controlRelease, deleteAuthoritativeRelease, getChannelsState,
   getAuditState, getRepositoryStatus, getPortalMonitor, getReleaseLifecycleEvents,
-  getApiConnectionState, saveApiConnection, testApiConnection
+  getApiConnectionState, saveApiConnection, testApiConnection,
+  getDevPanelSettings, updateDevPanelSettings
 } from "@/lib/panel.server";
 
 export const Route = createFileRoute("/")({ component: Index });
@@ -404,7 +405,7 @@ function Index() {
             {tab === "audit" && <AuditPage releases={allReleases} run={run} session={session} />}
             {tab === "access" && <AccessPage session={session} />}
             {tab === "api-connections" && <ApiConnectionsPage session={session} />}
-            {tab === "settings" && <SettingsPage data={data} connected={masterConnected} />}
+            {tab === "settings" && <SettingsPage data={data} connected={masterConnected} session={session} onChanged={()=>void load(session,true)} />}
           </div>
         </main>
       </div>
@@ -982,20 +983,61 @@ function ApiConnectionsPage({session}:any){
  </section>;
 }
 
-function SettingsPage({ data, connected }: any) {
+function SettingsPage({ data, connected, session, onChanged }: any) {
   const base = data.base?.repositories?.base;
   const engine = data.engine?.repositories?.engine;
   const channels = Array.from(new Set([
     ...(data.base?.channels || []),
     ...(data.engine?.channels || []),
   ])).join(", ") || "—";
+  const [profile,setProfile]=useState<any>(null);
+  const [profileBusy,setProfileBusy]=useState("");
+  const [profileError,setProfileError]=useState("");
+  const [profileNotice,setProfileNotice]=useState("");
 
+  const loadProfile=async()=>{
+    if(!session?.token)return;
+    try{setProfile(await getDevPanelSettings({data:{token:session.token}}));setProfileError("")}
+    catch(x:any){setProfileError(x?.message||"Unable to load GitHub profile")}
+  };
+  useEffect(()=>{void loadProfile()},[session?.token]);
+
+  const switchProfile=async(next:"primary"|"fallback")=>{
+    if(!session?.token||profile?.github_profile===next)return;
+    setProfileBusy(next);setProfileError("");setProfileNotice("");
+    try{
+      const updated=await updateDevPanelSettings({data:{token:session.token,github_profile:next}});
+      setProfile(updated);
+      setProfileNotice(next==="fallback"?"Temporary fallback GitHub account is active.":"Primary GitHub account is active.");
+      await onChanged?.();
+    }catch(x:any){setProfileError(x?.message||"Unable to switch GitHub profile")}
+    finally{setProfileBusy("")}
+  };
+
+  const active=profile?.github_profile||"—";
   return (
     <section className="space-y-4">
       <PageHead
         title="Configuration"
-        detail="Read-only runtime configuration visible to Stage 1. Secrets stay server-side."
+        detail="Runtime configuration for normal Dev Panel operations. MCP settings are separate."
       />
+      <section className="orbit-panel">
+        <div className="orbit-panel-head"><span className="orbit-panel-icon"><Github size={15}/></span><div><h2>GitHub control profile</h2><p>Switch all five repository mappings together.</p></div></div>
+        <div className="p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2"><strong className="text-sm">Active account</strong><StatusPill text={active==="fallback"?"Temporary fallback":"Primary"}/></div>
+              <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">Primary maps 1→1 through 5→5 to lucaskerim123. Fallback maps the same five roles to remipetrovich-design, including Base <code>base-release</code> and Engine <code>UPDATE_RELEASES</code>.</p>
+            </div>
+            <div className="flex gap-2">
+              <button className={active==="primary"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="primary"} onClick={()=>void switchProfile("primary")}>Primary · lucaskerim123</button>
+              <button className={active==="fallback"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="fallback"} onClick={()=>void switchProfile("fallback")}>Fallback · remipetrovich-design</button>
+            </div>
+          </div>
+          {profileError&&<div className="mt-3 rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-100">{profileError}</div>}
+          {profileNotice&&<div className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">{profileNotice}</div>}
+        </div>
+      </section>
       <div className="grid gap-4 md:grid-cols-2">
         <ConfigCard
           title="License Master"
