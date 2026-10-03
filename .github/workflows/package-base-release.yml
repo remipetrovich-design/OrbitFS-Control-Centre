@@ -54,7 +54,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL || 'https://incendiarynetworks.cc/api/v1' }}
+  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL }}
 
 jobs:
   base-validation:
@@ -65,11 +65,11 @@ jobs:
       - name: Verify private Base checkout credential
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
-            echo "::error::Missing Dev Panel Actions secret ORBITFS_RELEASE_DISPATCH_TOKEN."
+            echo "::error::Missing Dev Panel Actions secret ORBITFS_FALLBACK_GITHUB_TOKEN."
             exit 1
           }
 
@@ -88,7 +88,7 @@ jobs:
         with:
           repository: remipetrovich-design/OrbitFS-Base-System
           ref: base-release
-          token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Verify exact inspected Base source
@@ -125,11 +125,11 @@ jobs:
       - name: Verify private Base checkout credential
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
-            echo "::error::Missing Dev Panel Actions secret ORBITFS_RELEASE_DISPATCH_TOKEN. The default GITHUB_TOKEN cannot checkout the private repository ${{ inputs.source_repo }}."
+            echo "::error::Missing Dev Panel Actions secret ORBITFS_FALLBACK_GITHUB_TOKEN. The default GITHUB_TOKEN cannot checkout the private repository ${{ inputs.source_repo }}."
             exit 1
           }
 
@@ -154,7 +154,7 @@ jobs:
         with:
           repository: remipetrovich-design/OrbitFS-Base-System
           ref: base-release
-          token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
           fetch-depth: 0
           path: base-source
 
