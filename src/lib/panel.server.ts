@@ -333,6 +333,8 @@ export const updateDevPanelSettings=createServerFn({method:"POST"}).handler(asyn
  });
  if(auditError)console.error("GitHub profile audit write failed",auditError);
  clearGithubProfileCache();
+ operationsStateCache=null;
+ githubReadCache.clear();
  return {github_profile:profile,updated_at:updated.updated_at||changedAt,updated_by:updated.updated_by||actor.id,profiles:githubProfileDefinitions()};
 });
 function hashPassword(password:string){
@@ -1703,20 +1705,21 @@ async function operationsRunDetail(cfg:any){
  return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:cleanOperationsRun(run),ciRun:cleanOperationsRun(ciRun),deployRun:cleanOperationsRun(deployRun),quickDeployRun:cleanOperationsRun(quickDeployRun),latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs,failure,chatPrompt,monitoring:run.name||"Workflow"};
 }
 
-let operationsStateCache:{value:any;expires:number}|null=null;
+let operationsStateCache:{profile:"primary"|"fallback";value:any;expires:number}|null=null;
 
 export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
- if(operationsStateCache&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
+ const profile=await activeGithubProfileName();
+ if(operationsStateCache&&operationsStateCache.profile===profile&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
  const keys:OperationsSystem[]=["licenseManager","billingStore"];
  try{
   const configs=await operationsRepos();
-   const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key])] as const));
-  const value={checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries),stale:false};
-  operationsStateCache={value,expires:Date.now()+12000};
+  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key])] as const));
+  const value={checkedAt:new Date().toISOString(),profile,systems:Object.fromEntries(entries),stale:false};
+  operationsStateCache={profile,value,expires:Date.now()+12000};
   return value;
  }catch(error:any){
-  if(operationsStateCache){
+  if(operationsStateCache&&operationsStateCache.profile===profile){
    return {...operationsStateCache.value,stale:true,warning:"GitHub API is temporarily unavailable or rate-limited; showing the last known Operations state.",checkedAt:new Date().toISOString()};
   }
   throw error;
