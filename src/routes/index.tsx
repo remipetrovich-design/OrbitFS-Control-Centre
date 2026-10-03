@@ -90,9 +90,9 @@ function Index() {
         // overwrite a newly selected release with an older run.
         restoredRunRef.current = true;
         const candidates = [
-          ...(base.drafts || []).map((draft:any) => ({draft, type:"base", repo:base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel"})),
-          ...(engine.drafts || []).map((draft:any) => ({draft, type:"engine", repo:engine.repositories?.engine?.repo || "lucaskerim123/V1-vercel-engine"}))
-        ].flatMap(({draft,type,repo}:any) => (draft.attempts || [])
+          ...(base.drafts || []).map((draft:any) => ({draft, type:"base", repo:base.repositories?.base?.workerRepo || ""})),
+          ...(engine.drafts || []).map((draft:any) => ({draft, type:"engine", repo:engine.repositories?.engine?.repo || ""}))
+        ].filter(({repo}:any)=>Boolean(repo)).flatMap(({draft,type,repo}:any) => (draft.attempts || [])
           .filter((attempt:any) => Number(attempt.run_id)>0 && !draft.archived_at)
           .map((attempt:any) => ({draft,type,repo,attempt})))
           .sort((a:any,b:any) => new Date(b.attempt.created_at || b.draft.updated_at || 0).getTime()-new Date(a.attempt.created_at || a.draft.updated_at || 0).getTime());
@@ -172,7 +172,9 @@ function Index() {
     let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       try {
-        const type: ReleaseType = runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? "base" : "engine";
+        const baseWorkerRepo=String(data.base.repositories?.base?.workerRepo||"");
+        const engineWorkerRepo=String(data.engine.repositories?.engine?.repo||"");
+        const type: ReleaseType = runRepo===baseWorkerRepo?"base":runRepo===engineWorkerRepo?"engine":(()=>{throw new Error("Release run repository does not match the active GitHub profile.")})();
         const r = await getReleaseHandoff({
           data: { token: session.token, type, version: runVersion, channel: runChannel }
         });
@@ -215,9 +217,10 @@ function Index() {
   };
 
   const resumeReleaseRun = (type: ReleaseType, draft: any, attempt: any) => {
-    const repo = type === "base"
-      ? (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel")
-      : (data.engine.repositories?.engine?.repo || "lucaskerim123/V1-vercel-engine");
+    const repo = String(type === "base"
+      ? (data.base.repositories?.base?.workerRepo || "")
+      : (data.engine.repositories?.engine?.repo || ""));
+    if(!repo){setError("Active GitHub profile release worker repository is unavailable. Refresh Configuration before resuming this run.");return}
     setRun({
       id: Number(attempt.run_id),
       status: String(attempt.status || "queued"),
@@ -390,11 +393,11 @@ function Index() {
             {tab === "base" && <Composer key={"base-"+releasePageEpoch} type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("base")} onStart={(options:any) => start("base",options)} run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("base",d,a)} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              onInspect={() => inspect("base")} onStart={(options:any) => start("base",options)} run={runRepo === (data.base.repositories?.base?.workerRepo || "") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("base",d,a)} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "engine" && <Composer key={"engine-"+releasePageEpoch} type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={Boolean(data.engine.repositories?.engine?.repo)&&runRepo === data.engine.repositories.engine.repo ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
             {tab === "mcp-controls" && <McpControlsWorkspace session={session} />}
