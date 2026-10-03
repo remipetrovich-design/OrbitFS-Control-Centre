@@ -289,9 +289,27 @@ export const getDevPanelSettings=createServerFn({method:"POST"}).handler(async({
  return {github_profile:profile,updated_at:row?.updated_at||null,profiles:githubProfileDefinitions()};
 });
 
+async function verifyGithubProfileCredential(profileName:"primary"|"fallback"){
+ const profiles=githubProfileDefinitions();
+ const profile=profiles[profileName];
+ const token=required(profile.tokenEnv);
+ const repos=[profile.licenseManager.repo,profile.billingStore.repo,profile.devPanel.repo,profile.base.repo,profile.engine.repo];
+ for(const target of repos){
+  try{
+   await requestJson("https://api.github.com/repos/"+target,{
+    headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json"}
+   });
+  }catch(error:any){
+   throw new Error("Cannot activate "+profileName+" GitHub profile: "+target+" credential check failed. "+String(error?.message||error));
+  }
+ }
+ return true;
+}
+
 export const updateDevPanelSettings=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;github_profile:"primary"|"fallback"}})=>{
  const actor=requireOwner(data.token);
  const profile=data.github_profile==="fallback"?"fallback":"primary";
+ await verifyGithubProfileCredential(profile);
  const {error}=await authClient().from("dev_panel_settings").upsert({
   id:true,github_profile:profile,updated_by:actor.id,updated_at:new Date().toISOString()
  },{onConflict:"id"});
