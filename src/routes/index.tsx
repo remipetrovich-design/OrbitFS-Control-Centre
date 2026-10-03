@@ -995,6 +995,7 @@ function SettingsPage({ data, connected, session, onChanged }: any) {
   const [profileBusy,setProfileBusy]=useState("");
   const [profileError,setProfileError]=useState("");
   const [profileNotice,setProfileNotice]=useState("");
+  const [profileCheckpoint,setProfileCheckpoint]=useState<"primary"|"fallback"|null>(null);
 
   const loadProfile=async()=>{
     if(!session?.token)return;
@@ -1020,6 +1021,25 @@ function SettingsPage({ data, connected, session, onChanged }: any) {
     finally{setProfileBusy("")}
   };
 
+  const requestProfileSwitch=(next:"primary"|"fallback")=>{
+    if(!session?.token||profile?.github_profile===next||profileBusy)return;
+    setProfileError("");
+    setProfileNotice("");
+    setProfileCheckpoint(next);
+  };
+
+  const rejectVercelCheckpoint=()=>{
+    setProfileCheckpoint(null);
+    setProfileNotice("");
+    setProfileError("Your an idiot, Go change them first");
+  };
+
+  const acceptVercelCheckpoint=()=>{
+    const next=profileCheckpoint;
+    setProfileCheckpoint(null);
+    if(next)void switchProfile(next);
+  };
+
   const active=profile?.github_profile||"—";
   return (
     <section className="space-y-4">
@@ -1036,14 +1056,24 @@ function SettingsPage({ data, connected, session, onChanged }: any) {
               <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">Primary maps 1→1 through 5→5 to lucaskerim123. Fallback maps the same five roles to remipetrovich-design, including Base <code>base-release</code> and Engine <code>UPDATE_RELEASES</code>.</p>
             </div>
             <div className="flex gap-2">
-              <button className={active==="primary"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="primary"} onClick={()=>void switchProfile("primary")}>Primary · lucaskerim123</button>
-              <button className={active==="fallback"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="fallback"} onClick={()=>void switchProfile("fallback")}>Fallback · remipetrovich-design</button>
+              <button className={active==="primary"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="primary"} onClick={()=>requestProfileSwitch("primary")}>Primary · lucaskerim123</button>
+              <button className={active==="fallback"?"button-primary":"button-secondary"} disabled={profileBusy!==""||active==="fallback"} onClick={()=>requestProfileSwitch("fallback")}>Fallback · remipetrovich-design</button>
             </div>
           </div>
           {profileError&&<div className="mt-3 rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-100">{profileError}</div>}
           {profileNotice&&<div className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">{profileNotice}</div>}
         </div>
       </section>
+      {profileCheckpoint&&<div className="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-4" role="presentation">
+        <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="github-profile-vercel-checkpoint">
+          <h3 id="github-profile-vercel-checkpoint" className="text-base font-semibold">Have you set the Vercel?</h3>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">Confirm this before switching the active GitHub profile.</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className="button-secondary" onClick={rejectVercelCheckpoint}>No</button>
+            <button type="button" className="button-primary" onClick={acceptVercelCheckpoint}>Yes</button>
+          </div>
+        </div>
+      </div>}
       <div className="grid gap-4 md:grid-cols-2">
         <ConfigCard
           title="License Master"
