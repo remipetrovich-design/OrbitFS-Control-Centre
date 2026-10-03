@@ -3,17 +3,19 @@ import {createServerFn} from "@tanstack/react-start";
 import crypto from "node:crypto";
 import {inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
 import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
+import {activeGithubProfile,activeGithubProfileName,githubToken,githubProfiles} from "@/lib/github-profile";
 
 type ReleaseTarget="base"|"engine";
 type ServiceTarget="license_manager"|"billing_store";
 
+const GITHUB_PROFILE=activeGithubProfile();
 const RELEASE_TARGETS={
- base:{key:"base" as const,label:"V1 Base",repo:process.env.BASE_RELEASE_REPO||"lucaskerim123/V1-vercel-base",branch:"main",releaseRef:process.env.BASE_RELEASE_REF||"base-release",workflow:"sync-release-branch.yml"},
- engine:{key:"engine" as const,label:"V1 Engine",repo:process.env.ENGINE_RELEASE_REPO||"lucaskerim123/V1-vercel-engine",branch:"main",releaseRef:process.env.ENGINE_RELEASE_REF||"UPDATE_RELEASE",workflow:"sync-release-branch.yml"},
+ base:{key:"base" as const,label:"V1 Base",repo:GITHUB_PROFILE.base.repo,branch:GITHUB_PROFILE.base.branch,releaseRef:GITHUB_PROFILE.base.releaseRef,workflow:"sync-release-branch.yml"},
+ engine:{key:"engine" as const,label:"V1 Engine",repo:GITHUB_PROFILE.engine.repo,branch:GITHUB_PROFILE.engine.branch,releaseRef:GITHUB_PROFILE.engine.releaseRef,workflow:"sync-release-branch.yml"},
 };
 const SERVICE_TARGETS={
- license_manager:{key:"license_manager" as const,label:"Custom License Manager",repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",branch:"main",scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml"},
- billing_store:{key:"billing_store" as const,label:"V2 Billing Store",repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",branch:"main",scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml"},
+ license_manager:{key:"license_manager" as const,label:"Custom License Manager",repo:GITHUB_PROFILE.licenseManager.repo,branch:GITHUB_PROFILE.licenseManager.branch,scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml"},
+ billing_store:{key:"billing_store" as const,label:"V2 Billing Store",repo:GITHUB_PROFILE.billingStore.repo,branch:GITHUB_PROFILE.billingStore.branch,scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml"},
 };
 export const DEFAULT_MCP_SETTINGS={
  enabled:true,read_only_mode:false,allow_mutations:true,
@@ -51,7 +53,7 @@ export async function updateMcpSettings(actor:any,patch:Record<string,unknown>){
 export const getMcpSettingsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
  const origin=String(process.env.DEV_MCP_PUBLIC_ORIGIN||process.env.APP_URL||"https://dev.incendiarynetworks.cc").replace(/\/+$/,"");
- return {settings:await getMcpSettings(),runtime:{
+ return {settings:await getMcpSettings(),github:{active:activeGithubProfileName(),profiles:githubProfiles()},runtime:{
   endpoint:origin+"/devmcp",oauth:true,ownerOnly:true,pkce:"S256",resourceBinding:true,
   protectedResourceMetadata:origin+"/.well-known/oauth-protected-resource",
   authorizationMetadata:origin+"/.well-known/oauth-authorization-server",
@@ -80,7 +82,7 @@ async function github(path:string,init:RequestInit={}){
   if(cached&&cached.staleUntil>Date.now())return cached.value;
   throw new Error("GitHub API rate limit is cooling down; retry after the reset window.");
  }
- const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+required("ORBITFS_RELEASE_DISPATCH_TOKEN"),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
+ const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+githubToken(),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
  const text=await response.text();let body:any=null;try{body=text?JSON.parse(text):null}catch{}
  if(!response.ok){
   if(response.status===403||response.status===429){
