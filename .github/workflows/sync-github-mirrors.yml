@@ -127,13 +127,16 @@ jobs:
             dst="target-$key"
             echo "::group::Prepare $key"
             git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
-            rsync -a --delete --exclude=".git/" "$src/" "$dst/"
+            excludes=(--exclude=".git/" --exclude=".github/workflows/")
+            if [ "$key" = "control" ]; then
+              excludes+=(--exclude=".env.example")
+            fi
+            rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
+            remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
+            test -z "$remaining" || { echo "::error::Mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
             git -C "$dst" config user.name "OrbitFS Repository Sync"
             git -C "$dst" config user.email "actions@users.noreply.github.com"
             git -C "$dst" add -A -f
-            source_tree="$(git -C "$src" rev-parse HEAD^{tree})"
-            staged_tree="$(git -C "$dst" write-tree)"
-            test "$source_tree" = "$staged_tree" || { echo "::error::Staged tree mismatch for $key."; exit 1; }
             if git -C "$dst" diff --cached --quiet; then
               echo "current" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
               echo "$key already current"
@@ -170,13 +173,17 @@ jobs:
               expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
               git -C "$dst" push --force-with-lease="refs/heads/main:$expected" origin HEAD:main
               git -C "$dst" fetch --quiet origin main
-              source_tree="$(git -C "$src" rev-parse HEAD^{tree})"
-              remote_tree="$(git -C "$dst" rev-parse origin/main^{tree})"
-              test "$source_tree" = "$remote_tree" || { echo "::error::Post-push tree verification failed for $key."; exit 1; }
-              echo "- ✅ $key — synced and verified" >> "$GITHUB_STEP_SUMMARY"
+              test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse origin/main)" || { echo "::error::Remote main verification failed for $key."; exit 1; }
+              excludes=(--exclude=".git/" --exclude=".github/workflows/")
+              if [ "$key" = "control" ]; then
+                excludes+=(--exclude=".env.example")
+              fi
+              remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
+              test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
+              echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "- ✅ $key — already current" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five target main branches match their source Git trees." >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved; Control Centre also preserves its target .env.example." >> "$GITHUB_STEP_SUMMARY"
