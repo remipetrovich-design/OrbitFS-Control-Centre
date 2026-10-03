@@ -1,0 +1,182 @@
+name: Sync GitHub mirrors
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type SYNC to mirror all five main branches in this direction
+        required: true
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orbitfs-five-repo-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync five main repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && secrets.ORBITFS_RELEASE_DISPATCH_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
+      TARGET_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && secrets.ORBITFS_FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+    steps:
+      - name: Verify direction and credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.confirmation }}" = "SYNC" || { echo "::error::Confirmation must be SYNC."; exit 1; }
+          case "$GITHUB_REPOSITORY" in
+            lucaskerim123/Dev-panel|remipetrovich-design/OrbitFS-Control-Centre) ;;
+            *) echo "::error::This workflow may only run from Dev-panel or OrbitFS-Control-Centre."; exit 1 ;;
+          esac
+          test -n "${SOURCE_TOKEN:-}" || { echo "::error::Source GitHub credential is missing."; exit 1; }
+          test -n "${TARGET_TOKEN:-}" || { echo "::error::Target GitHub credential is missing."; exit 1; }
+
+      - name: Checkout Base source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
+          ref: main
+          token: ${{ env.SOURCE_TOKEN }}
+          persist-credentials: false
+          path: source-base
+      - name: Checkout Base target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
+          ref: main
+          token: ${{ env.TARGET_TOKEN }}
+          path: target-base
+
+      - name: Checkout Engine source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
+          ref: main
+          token: ${{ env.SOURCE_TOKEN }}
+          persist-credentials: false
+          path: source-engine
+      - name: Checkout Engine target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
+          ref: main
+          token: ${{ env.TARGET_TOKEN }}
+          path: target-engine
+
+      - name: Checkout License source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/Custom-licence-manager' || 'remipetrovich-design/OrbitFS-License-Administration' }}
+          ref: main
+          token: ${{ env.SOURCE_TOKEN }}
+          persist-credentials: false
+          path: source-license
+      - name: Checkout License target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-License-Administration' || 'lucaskerim123/Custom-licence-manager' }}
+          ref: main
+          token: ${{ env.TARGET_TOKEN }}
+          path: target-license
+
+      - name: Checkout Billing source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V2_Billing_Store' || 'remipetrovich-design/OrbitFS-Billing-Shopfront' }}
+          ref: main
+          token: ${{ env.SOURCE_TOKEN }}
+          persist-credentials: false
+          path: source-billing
+      - name: Checkout Billing target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Billing-Shopfront' || 'lucaskerim123/V2_Billing_Store' }}
+          ref: main
+          token: ${{ env.TARGET_TOKEN }}
+          path: target-billing
+
+      - name: Checkout Control source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/Dev-panel' || 'remipetrovich-design/OrbitFS-Control-Centre' }}
+          ref: main
+          token: ${{ env.SOURCE_TOKEN }}
+          persist-credentials: false
+          path: source-control
+      - name: Checkout Control target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Control-Centre' || 'lucaskerim123/Dev-panel' }}
+          ref: main
+          token: ${{ env.TARGET_TOKEN }}
+          path: target-control
+
+      - name: Prepare and preflight all five targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/orbitfs-sync"
+          for key in base engine license billing control; do
+            src="source-$key"
+            dst="target-$key"
+            echo "::group::Prepare $key"
+            git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
+            rsync -a --delete --exclude=".git/" "$src/" "$dst/"
+            git -C "$dst" config user.name "OrbitFS Repository Sync"
+            git -C "$dst" config user.email "actions@users.noreply.github.com"
+            git -C "$dst" add -A -f
+            source_tree="$(git -C "$src" rev-parse HEAD^{tree})"
+            staged_tree="$(git -C "$dst" write-tree)"
+            test "$source_tree" = "$staged_tree" || { echo "::error::Staged tree mismatch for $key."; exit 1; }
+            if git -C "$dst" diff --cached --quiet; then
+              echo "current" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+              echo "$key already current"
+            else
+              echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+              git -C "$dst" commit --quiet -m "Sync main from mirror source"
+              git -C "$dst" push --dry-run origin HEAD:main
+              echo "$key prepared and push permission verified"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Apply and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
+            direction="lucaskerim123 → remipetrovich-design"
+          else
+            direction="remipetrovich-design → lucaskerim123"
+          fi
+          {
+            echo "## Repository mirror sync"
+            echo ""
+            echo "**Direction:** $direction"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for key in base engine license billing control; do
+            src="source-$key"
+            dst="target-$key"
+            state="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")"
+            if [ "$state" = "changed" ]; then
+              expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
+              git -C "$dst" push --force-with-lease="refs/heads/main:$expected" origin HEAD:main
+              git -C "$dst" fetch --quiet origin main
+              source_tree="$(git -C "$src" rev-parse HEAD^{tree})"
+              remote_tree="$(git -C "$dst" rev-parse origin/main^{tree})"
+              test "$source_tree" = "$remote_tree" || { echo "::error::Post-push tree verification failed for $key."; exit 1; }
+              echo "- ✅ $key — synced and verified" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- ✅ $key — already current" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target main branches match their source Git trees." >> "$GITHUB_STEP_SUMMARY"
