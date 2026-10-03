@@ -116,13 +116,13 @@ export function OperationsWorkspace({session}:{session:any}){
 
   <section className="release-surface overflow-hidden">
    <div className="orbit-section-bar">
-    <div className="orbit-section-head"><span className="orbit-section-icon"><Github size={15}/></span><div><h2>Repository mirror sync</h2><p>Manual one-way sync of all five OrbitFS main repositories. The target is verified against the source Git tree before push.</p></div></div>
+    <div className="orbit-section-head"><span className="orbit-section-icon"><Github size={15}/></span><div><h2>Repository mirror sync</h2><p>Manual one-way sync of all five OrbitFS main repositories. Target-specific GitHub workflows are preserved while application files are mirrored.</p></div></div>
     <Pill text={syncLive?"LIVE":syncState?.latestRun?.conclusion==="success"?"PASSED":syncState?.latestRun?.conclusion?String(syncState.latestRun.conclusion).toUpperCase():"IDLE"}/>
    </div>
    <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
     <div className="min-w-0">
      <p className="text-xs font-semibold">{syncState?syncState.sourceOwner+" → "+syncState.targetOwner:"Loading sync direction…"}</p>
-     <p className="mt-1 text-[10px] leading-5 text-muted-foreground">Syncs Base, Engine, License Manager, Billing Store and this control panel on <code>main</code>. No extra branches are created.</p>
+     <p className="mt-1 text-[10px] leading-5 text-muted-foreground">Syncs Base, Engine, License Manager, Billing Store and this control panel on <code>main</code>. Target workflow configuration is preserved and no extra branches are created.</p>
      {syncState?.latestRun&&<p className="mt-1 text-[9px] text-muted-foreground">Last run #{syncState.latestRun.run_number} · {syncState.latestRun.status}{syncState.latestRun.conclusion?" · "+syncState.latestRun.conclusion:""}</p>}
     </div>
     <div className="flex flex-wrap items-center gap-2">
