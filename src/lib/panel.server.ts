@@ -527,7 +527,10 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
   String(r.review_status||"").toLowerCase()==="rejected"&&
   String(r?.manifest?.review_handoff?.state||"").toLowerCase()==="returned_to_dev"
  );
- const receiptRows=authoritativeRows.filter((r:any)=>!r.archived_at&&String(r.review_status||"").toLowerCase()!=="rejected");
+ const receiptRows=authoritativeRows.filter((r:any)=>{
+   const status=String(r.status||"").toLowerCase();
+   return !r.archived_at&&String(r.review_status||"").toLowerCase()!=="rejected"&&!["withdrawn","superseded","disabled"].includes(status);
+  });
  const authoritativeKeys=new Set(receiptRows.map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
