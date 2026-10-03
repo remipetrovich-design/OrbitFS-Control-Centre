@@ -62,7 +62,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. Remaining workflow steps are disabled."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
       - name: Verify private Base checkout credential
+        if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
           BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
@@ -74,6 +93,7 @@ jobs:
           }
 
       - name: Enforce Base source contract
+        if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
           SOURCE_REPO: ${{ inputs.source_repo }}
@@ -84,6 +104,7 @@ jobs:
           test "$SOURCE_REF" = "base-release" || { echo "::error::Base packaging is locked to base-release."; exit 1; }
 
       - name: Checkout Base release branch
+        if: steps.profile.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           repository: remipetrovich-design/OrbitFS-Base-System
@@ -92,6 +113,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify exact inspected Base source
+        if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.source_sha }}
@@ -106,13 +128,17 @@ jobs:
           }
 
       - uses: actions/setup-node@v4
+        if: steps.profile.outputs.run == 'true'
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
+        if: steps.profile.outputs.run == 'true'
       - run: npm run check
+        if: steps.profile.outputs.run == 'true'
       - run: npm run build
+        if: steps.profile.outputs.run == 'true'
 
   package:
     needs: base-validation
@@ -123,6 +149,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Verify private Base checkout credential
+        if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
           BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
@@ -134,6 +161,7 @@ jobs:
           }
 
       - name: Enforce Base source contract
+        if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
           SOURCE_REPO: ${{ inputs.source_repo }}
@@ -150,6 +178,7 @@ jobs:
           }
 
       - name: Checkout Base release branch
+        if: steps.profile.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           repository: remipetrovich-design/OrbitFS-Base-System
@@ -159,6 +188,7 @@ jobs:
           path: base-source
 
       - name: Verify exact inspected Base source
+        if: steps.profile.outputs.run == 'true'
         working-directory: base-source
         shell: bash
         env:
@@ -175,11 +205,13 @@ jobs:
           echo "Confirmed Base source: remipetrovich-design/OrbitFS-Base-System@base-release ($ACTUAL_SHA)"
 
       - name: Setup Node
+        if: steps.profile.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Build authoritative customer database snapshot
+        if: steps.profile.outputs.run == 'true'
         working-directory: base-source
         shell: bash
         run: |
@@ -194,6 +226,7 @@ jobs:
           test -s supabase/customer-schema.sql || { echo "::error::customer-schema.sql was not generated"; exit 1; }
 
       - name: Verify generated database snapshot is current
+        if: steps.profile.outputs.run == 'true'
         working-directory: base-source
         shell: bash
         run: |
@@ -214,6 +247,7 @@ jobs:
           echo "Customer DB snapshot is current: $migration_count_packaged migrations, latest $packaged_latest_migration."
 
       - name: Register Base database package candidate
+        if: steps.profile.outputs.run == 'true'
         id: database-package
         working-directory: base-source
         shell: bash
@@ -247,6 +281,7 @@ jobs:
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
 
       - name: Build release information
+        if: steps.profile.outputs.run == 'true'
         working-directory: base-source
         shell: bash
         env:
@@ -306,6 +341,7 @@ jobs:
           NODE
 
       - name: Build deployable Base artifact
+        if: steps.profile.outputs.run == 'true'
         id: package
         working-directory: base-source
         shell: bash
@@ -382,6 +418,7 @@ jobs:
           echo "artifact_tag=orbitfs-base-v${VERSION}-run-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
 
       - name: Store packaged Base artifact in Dev Panel release registry
+        if: steps.profile.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: ${{ steps.package.outputs.file }}
@@ -398,6 +435,7 @@ jobs:
             --notes "Packaged by Dev Panel from ${{ inputs.source_repo }}@${SOURCE_SHA}."
 
       - name: Create Base release in License Manager
+        if: steps.profile.outputs.run == 'true'
         id: master-release
         working-directory: base-source
         env:
