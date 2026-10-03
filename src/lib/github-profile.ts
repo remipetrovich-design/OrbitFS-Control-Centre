@@ -29,7 +29,7 @@ const FALLBACK:GithubProfile={
  owner:"remipetrovich-design",
  tokenEnv:"ORBITFS_FALLBACK_GITHUB_TOKEN",
  base:{repo:process.env.FALLBACK_BASE_RELEASE_REPO||"remipetrovich-design/OrbitFS-Base-System",branch:"main",releaseRef:process.env.FALLBACK_BASE_RELEASE_REF||"base-release"},
- engine:{repo:process.env.FALLBACK_ENGINE_RELEASE_REPO||"remipetrovich-design/OrbitFS_Engine",branch:"main",releaseRef:process.env.FALLBACK_ENGINE_RELEASE_REF||"UPDATE_RELEASES",baselineRef:process.env.FALLBACK_ENGINE_BASELINE_REF||"main"},
+ engine:{repo:process.env.FALLBACK_ENGINE_RELEASE_REPO||"remipetrovich-design/OrbitFS_Engine",branch:"main",releaseRef:process.env.FALLBACK_ENGINE_RELEASE_REF||"UPDATE_RELEASE",baselineRef:process.env.FALLBACK_ENGINE_BASELINE_REF||"main"},
  devPanel:{repo:process.env.FALLBACK_DEV_PANEL_REPO||"remipetrovich-design/OrbitFS-Control-Centre",branch:"main"},
  licenseManager:{repo:process.env.FALLBACK_LICENSE_MANAGER_REPO||"remipetrovich-design/OrbitFS-License-Administration",branch:"main"},
  billingStore:{repo:process.env.FALLBACK_BILLING_STORE_REPO||"remipetrovich-design/OrbitFS-Billing-Shopfront",branch:"main"}
