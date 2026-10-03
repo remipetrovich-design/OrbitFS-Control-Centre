@@ -1,3 +1,5 @@
+import {createClient} from "@supabase/supabase-js";
+
 export type GithubProfileName="primary"|"fallback";
 
 export type GithubProfile={
@@ -33,16 +35,45 @@ const FALLBACK:GithubProfile={
  billingStore:{repo:process.env.FALLBACK_BILLING_STORE_REPO||"remipetrovich-design/OrbitFS-Billing-Shopfront",branch:"main"}
 };
 
-export function activeGithubProfileName():GithubProfileName{
+let profileCache:{name:GithubProfileName;expires:number}|null=null;
+
+function fallbackProfileName():GithubProfileName{
  return String(process.env.ORBITFS_GITHUB_PROFILE||"primary").trim().toLowerCase()==="fallback"?"fallback":"primary";
 }
-export function activeGithubProfile():GithubProfile{
- return activeGithubProfileName()==="fallback"?FALLBACK:PRIMARY;
+
+async function storedProfileName():Promise<GithubProfileName>{
+ if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
+ try{
+  const url=String(process.env.SUPABASE_URL||"").trim();
+  const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||"").trim();
+  if(url&&key){
+   const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+   const {data,error}=await db.from("dev_mcp_settings").select("github_profile").eq("id",true).maybeSingle();
+   if(!error){
+    const name=String(data?.github_profile||"").toLowerCase()==="fallback"?"fallback":"primary";
+    profileCache={name,expires:Date.now()+5000};
+    return name;
+   }
+  }
+ }catch{}
+ const name=fallbackProfileName();
+ profileCache={name,expires:Date.now()+5000};
+ return name;
 }
-export function githubToken(){
- const profile=activeGithubProfile();
+
+export function clearGithubProfileCache(){profileCache=null;}
+
+export async function activeGithubProfileName():Promise<GithubProfileName>{
+ return storedProfileName();
+}
+export async function activeGithubProfile():Promise<GithubProfile>{
+ return (await activeGithubProfileName())==="fallback"?FALLBACK:PRIMARY;
+}
+export async function githubToken(){
+ const profile=await activeGithubProfile();
  const value=String(process.env[profile.tokenEnv]||"").trim();
  if(!value)throw new Error("Missing server environment variable: "+profile.tokenEnv+" for "+profile.name+" GitHub profile");
  return value;
 }
-export function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:activeGithubProfileName()};}
+export async function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:await activeGithubProfileName()};}
+export function githubProfileDefinitions(){return {primary:PRIMARY,fallback:FALLBACK};}
