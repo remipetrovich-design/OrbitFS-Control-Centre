@@ -520,10 +520,13 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
  const authoritativeRows=(Array.isArray(releases?.releases)?releases.releases.filter((row:any)=>row&&typeof row==="object"):[]);
- // A rejected, never-published License Manager candidate has been handed back to
- // Dev Panel. It remains in License Manager only as technical/audit history until
- // the next build reuses it or Dev Panel explicitly deletes the returned draft.
- const returnedRows=authoritativeRows.filter((r:any)=>!r.published_at&&String(r.review_status||"").toLowerCase()==="rejected");
+ // A rejected License Manager release has been handed back to Dev Panel.
+ // published_at is immutable audit history: a previously published release may be
+ // withdrawn in Billing and then explicitly rejected back to Stage 1 for rework.
+ const returnedRows=authoritativeRows.filter((r:any)=>
+  String(r.review_status||"").toLowerCase()==="rejected"&&
+  String(r?.manifest?.review_handoff?.state||"").toLowerCase()==="returned_to_dev"
+ );
  const receiptRows=authoritativeRows.filter((r:any)=>!r.archived_at&&String(r.review_status||"").toLowerCase()!=="rejected");
  const authoritativeKeys=new Set(receiptRows.map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
@@ -742,8 +745,9 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
     throw new Error("GitHub succeeded recently. Wait 10 minutes for License Manager intake, refresh, then retry local orphan cleanup if the release still has not appeared.");
   }
  }
- // GitHub is now confirmed finished. Only after that do we delete the rejected
- // never-published License Manager candidate that was explicitly handed back.
+ // GitHub is now confirmed finished. Permanent License Manager deletion below
+ // remains limited to never-published releases; previously published history must
+ // stay retained even when the Stage 1 draft has been returned for rework.
  for(const release of returnedMatches){
   const id=String(release.id||"");
   if(!id)continue;
