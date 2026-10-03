@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
-import {activeGithubProfile,githubToken} from "@/lib/github-profile";
+import {activeGithubProfile,activeGithubProfileName,clearGithubProfileCache,githubProfileDefinitions,githubToken} from "@/lib/github-profile";
 
 async function githubContext(){
  const profile=await activeGithubProfile();
@@ -279,6 +279,26 @@ export function requireOwner(token:string){
  if(String(user.role).toLowerCase()!=="owner")throw new Error("Owner access required");
  return user;
 }
+
+export const getDevPanelSettings=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOwner(data.token);
+ const sb=authClient();
+ const {data:row,error}=await sb.from("dev_panel_settings").select("github_profile,updated_at,updated_by").eq("id",true).maybeSingle();
+ if(error)throw new Error("Unable to load Dev Panel settings: "+error.message);
+ const profile=String(row?.github_profile||await activeGithubProfileName())==="fallback"?"fallback":"primary";
+ return {github_profile:profile,updated_at:row?.updated_at||null,profiles:githubProfileDefinitions()};
+});
+
+export const updateDevPanelSettings=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;github_profile:"primary"|"fallback"}})=>{
+ const actor=requireOwner(data.token);
+ const profile=data.github_profile==="fallback"?"fallback":"primary";
+ const {error}=await authClient().from("dev_panel_settings").upsert({
+  id:true,github_profile:profile,updated_by:actor.id,updated_at:new Date().toISOString()
+ },{onConflict:"id"});
+ if(error)throw new Error("Unable to update Dev Panel settings: "+error.message);
+ clearGithubProfileCache();
+ return {github_profile:profile,profiles:githubProfileDefinitions()};
+});
 function hashPassword(password:string){
  if(password.length<10)throw new Error("Temporary password must be at least 10 characters");
  const salt=crypto.randomBytes(16).toString("hex");
