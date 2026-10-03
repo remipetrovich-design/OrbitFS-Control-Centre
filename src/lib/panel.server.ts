@@ -1378,13 +1378,24 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
    await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Archived automatically before Dev Panel Start Fresh cleanup"})});
   }
   const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
-  await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
+  if(deleted?.deleted!==true)throw new Error(`License Manager did not confirm permanent deletion of never-published release ${id}.`);
+ }
+ const verify=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
+ const remainingNeverPublished=(Array.isArray(verify?.releases)?verify.releases:[]).filter((r:any)=>
+  String(r.version||"")===version&&
+  String(r.channel||"stable").toLowerCase()===channel&&
+  String(r.release_type||"").toLowerCase()===releaseType&&
+  !r.published_at
+ );
+ if(remainingNeverPublished.length){
+  throw new Error(`Start Fresh did not complete: License Manager still has ${remainingNeverPublished.length} never-published v${version} ${releaseType} release record${remainingNeverPublished.length===1?"":"s"}. Local draft cleanup was stopped.`);
  }
  const {error:eventDeleteError}=await sb.from("panel_release_events").delete().eq("release_version",version).eq("release_type",releaseType).eq("channel",channel);
  if(eventDeleteError)throw new Error("Release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
  const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftDeleteError)throw new Error("Release records were cleared, but the Stage 1 draft could not be reset: "+draftDeleteError.message);
- return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,preservedHistoricalReleases:historical.length,archivedHistoricalReleases:reusableHistorical.length,deletedDrafts:(drafts||[]).length,warning:billingWarning||null};
+ return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,verifiedLicenseManagerCleanup:true,preservedHistoricalReleases:historical.length,archivedHistoricalReleases:reusableHistorical.length,deletedDrafts:(drafts||[]).length,warning:billingWarning||null};
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
