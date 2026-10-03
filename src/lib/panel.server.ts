@@ -944,7 +944,7 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
  const [sourceBranch,releaseBranch,runs]=await Promise.all([
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(sourceRef)}`),
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null),
-  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`).catch(()=>({workflow_runs:[]}))
+  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`,{cache:"no-store"}).catch(()=>({workflow_runs:[]}))
  ]);
  const sourceSha=String(sourceBranch?.object?.sha||"");
  const releaseSha=String(releaseBranch?.object?.sha||"");
@@ -1004,7 +1004,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  const [sourceBranch,releaseBranch,runs]=await Promise.all([
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(sourceRef)}`),
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null),
-  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`).catch(()=>({workflow_runs:[]})),
+  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`,{cache:"no-store"}).catch(()=>({workflow_runs:[]})),
  ]);
  const sourceSha=String(sourceBranch?.object?.sha||"");
  const releaseSha=String(releaseBranch?.object?.sha||"");
@@ -1027,7 +1027,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  for(let attempt=0;attempt<8&&!run;attempt++){
   await new Promise(resolve=>setTimeout(resolve,700));
   try{
-   const result=await github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`);
+   const result=await github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`,{cache:"no-store"});
    run=(result?.workflow_runs||[])
     .filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=dispatchedAt-5000)
     .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
@@ -1256,10 +1256,10 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  let runUrl:string|undefined;
  try{
    await github(`/repos/${workerRepo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,{method:"POST",body:JSON.stringify({ref:workerRef,inputs})});
-   for(let attempt=0;attempt<5&&!runId;attempt++){
-     await new Promise(r=>setTimeout(r,700));
+   for(let attempt=0;attempt<15&&!runId;attempt++){
+     await new Promise(r=>setTimeout(r,1000));
      try{
-       const runs=await github(`/repos/${workerRepo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(workerRef)}&per_page=10`);
+       const runs=await github(`/repos/${workerRepo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(workerRef)}&per_page=10`,{cache:"no-store"});
        const candidate=(runs?.workflow_runs||[]).filter((r:any)=>r.head_branch===workerRef&&new Date(r.created_at||0).getTime()>=dispatchedAt-5000).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
        runId=candidate?.id;
        runUrl=candidate?.html_url;
@@ -1486,7 +1486,7 @@ const githubReadCache=new Map<string,{value:any;expires:number;staleUntil:number
 let githubRateLimitedUntil=0;
 async function github(path:string,init:RequestInit={}){
  const method=String(init.method||"GET").toUpperCase();
- const key=method==="GET"?path:"";
+ const key=method==="GET"&&init.cache!=="no-store"?path:"";
  const cached=key?githubReadCache.get(key):null;
  if(cached&&cached.expires>Date.now())return cached.value;
  if(method==="GET"&&githubRateLimitedUntil>Date.now()){
@@ -1728,7 +1728,7 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
 
 async function findOperationsRun(cfg:any,workflow:string,startedAt:number){
  for(let attempt=0;attempt<8;attempt++){
-  const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch=main&per_page=5");
+  const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch=main&per_page=5",{cache:"no-store"});
   const run=(runs?.workflow_runs||[]).find((x:any)=>new Date(x.created_at).getTime()>=startedAt-2000);
   if(run)return cleanOperationsRun(run);
   await new Promise(resolve=>setTimeout(resolve,750));
