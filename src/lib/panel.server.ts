@@ -720,16 +720,6 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
  const returnedMatches=matches.filter((r:any)=>!r.published_at&&String(r.review_status||"").toLowerCase()==="rejected");
  const blockingMatches=matches.filter((r:any)=>!returnedMatches.some((returned:any)=>String(returned.id)===String(r.id)));
  if(blockingMatches.length)throw new Error("License Manager still owns an active or published release for this version. Local draft deletion is blocked; open the authoritative release record instead.");
- for(const release of returnedMatches){
-  const id=String(release.id||"");
-  if(!id)continue;
-  if(!release.archived_at){
-   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Rejected candidate returned to Dev Panel and deleted with its Stage 1 draft"})});
-  }
-  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
-  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
-  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of returned rejected release "+id+".");
- }
  const {data:attempts,error:attemptError}=await sb.from("panel_release_attempts").select("run_id,status").eq("draft_id",existing.id);
  if(attemptError)throw new Error("Unable to verify release attempts: "+attemptError.message);
  const workerRepo=releaseType==="base"?BASE_WORKER_REPO:ENGINE_REPO;
@@ -744,11 +734,23 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
    throw new Error("GitHub run #"+attempt.run_id+" is still active. Local draft deletion is blocked.");
   // Give a successful handoff time to appear in the authoritative registry.
   // Never mistake a brief ingestion delay for an orphaned local draft.
-  if(String(run?.conclusion||"").toLowerCase()==="success"){
+  if(String(run?.conclusion||"").toLowerCase()==="success"&&!returnedMatches.length){
    const finishedAt=Date.parse(String(run.updated_at||run.run_started_at||""));
    if(!Number.isFinite(finishedAt)||Date.now()-finishedAt<10*60*1000)
     throw new Error("GitHub succeeded recently. Wait 10 minutes for License Manager intake, refresh, then retry local orphan cleanup if the release still has not appeared.");
   }
+ }
+ // GitHub is now confirmed finished. Only after that do we delete the rejected
+ // never-published License Manager candidate that was explicitly handed back.
+ for(const release of returnedMatches){
+  const id=String(release.id||"");
+  if(!id)continue;
+  if(!release.archived_at){
+   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Rejected candidate returned to Dev Panel and deleted with its Stage 1 draft"})});
+  }
+  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
+  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of returned rejected release "+id+".");
  }
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
