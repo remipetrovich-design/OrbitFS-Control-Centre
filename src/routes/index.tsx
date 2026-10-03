@@ -375,7 +375,7 @@ function Index() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header connected={masterConnected} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} />
+      <Header connected={masterConnected} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} githubProfile={String(data?.base?.repositories?.base?.repo||"").startsWith("remipetrovich-design/")?"fallback":"primary"} />
       <MobileNav tab={tab} setTab={navigateTab} activeRun={!!run && !run.conclusion} />
       <div className="mx-auto flex min-h-[calc(100vh-66px)] max-w-[1680px]">
         <Sidebar tab={tab} setTab={navigateTab} activeRun={!!run && !run.conclusion} />
@@ -439,7 +439,7 @@ function Login(p: any) {
   </div>;
 }
 
-function Header({ connected, loading, onRefresh, onSignOut, user }: any) {
+function Header({ connected, loading, onRefresh, onSignOut, user, githubProfile }: any) {
   return <header className="orbit-topbar sticky top-0 z-40 border-b">
     <div className="flex h-[72px] items-center gap-4 px-4 sm:px-6">
       <div className="flex min-w-0 items-center gap-3 md:hidden">
@@ -455,6 +455,7 @@ function Header({ connected, loading, onRefresh, onSignOut, user }: any) {
         </div>
       </div>
       <div className="ml-auto flex items-center gap-2">
+        {["owner","admin"].includes(String(user?.role||"").toLowerCase())&&<div className={`orbit-master-badge ${githubProfile==="fallback"?"is-offline":"is-online"}`} title="Active GitHub control/source profile"><span></span>{githubProfile==="fallback"?"FALLBACK · remipetrovich-design":"PRIMARY · lucaskerim123"}</div>}
         <div className={`orbit-master-badge ${connected?"is-online":"is-offline"}`}><span></span>{connected?"License Master online":"License Master offline"}</div>
         <button className="icon-button" title="Refresh" onClick={onRefresh}><RefreshCw className={loading ? "animate-spin" : ""} size={15}/></button>
         <div className="orbit-user-chip">
