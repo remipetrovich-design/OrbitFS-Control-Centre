@@ -1288,10 +1288,9 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
    if(createError)throw new Error("Unable to create release draft: "+createError.message);
    draft=created;
  }
- await sb.from("panel_release_attempts").delete().eq("draft_id",draft.id).in("status",["failure","cancelled","skipped"]);
- const {data:remainingAttempts,error:remainingAttemptsError}=await sb.from("panel_release_attempts").select("attempt_number").eq("draft_id",draft.id).order("attempt_number",{ascending:false}).limit(1);
- if(remainingAttemptsError)throw new Error("Unable to clean stale release attempts: "+remainingAttemptsError.message);
- const attemptNumber=Number(remainingAttempts?.[0]?.attempt_number||0)+1;
+ const {data:attemptRows,error:attemptRowsError}=await sb.from("panel_release_attempts").select("attempt_number").eq("draft_id",draft.id).order("attempt_number",{ascending:false}).limit(1);
+ if(attemptRowsError)throw new Error("Unable to resolve release attempt history: "+attemptRowsError.message);
+ const attemptNumber=Math.max(Number(draft.latest_attempt||0),Number(attemptRows?.[0]?.attempt_number||0))+1;
  const {error:draftUpdateError}=await sb.from("panel_release_drafts").update({status:"building",latest_attempt:attemptNumber,last_error:null,last_run_id:null,last_run_url:null,source_sha:head,inputs:inputSnapshot,updated_at:new Date().toISOString()}).eq("id",draft.id);
  if(draftUpdateError)throw new Error("Unable to prepare release attempt: "+draftUpdateError.message);
  const {data:attemptRow,error:attemptCreateError}=await sb.from("panel_release_attempts").insert({draft_id:draft.id,attempt_number:attemptNumber,status:"queued"}).select("*").single();
