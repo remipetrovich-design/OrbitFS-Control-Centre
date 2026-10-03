@@ -402,6 +402,12 @@ jobs:
             releaseNotes:fs.readFileSync("release-package/changelog.md","utf8"),
             releaseInfo,
             components:["base"],
+            runtimeOwnership:{
+              base:"base-deployer-updater",
+              innerDeployer:"base",
+              engineUpdaterExecutor:"base-inner-deployer-v1",
+              excludedUpdateTargets:["mcp","apex","studio"]
+            },
             databasePackages:{
               format:"orbitfs-database-package-set-v1",
               packages:[JSON.parse(process.env.DATABASE_PACKAGE_REFERENCE)]
@@ -466,7 +472,7 @@ jobs:
             --arg checksum "$ARTIFACT_SHA256" \
             --arg notes "$NOTES" \
             --argjson artifact_run_id "$GITHUB_RUN_ID" \
-            --argjson package_manifest "$(jq -c '{schemaVersion,format,databaseSchemaVersion,databaseSchemaSha256,databaseSchemaPath,databaseMigrationCount,databaseLatestMigration,version,sourceCommit,fileCount,title,description,releaseInfo,components,databasePackages,projectSettings}' release-package/manifest.json)" \
+            --argjson package_manifest "$(jq -c '{schemaVersion,format,databaseSchemaVersion,databaseSchemaSha256,databaseSchemaPath,databaseMigrationCount,databaseLatestMigration,version,sourceCommit,fileCount,title,description,releaseInfo,components,runtimeOwnership,databasePackages,projectSettings}' release-package/manifest.json)" \
             --argjson changed_files "$(printf '%s' "$CONTROL_CHANGED_FILES" | jq -c '.')" \
             --argjson release_record "$(printf '%s' "$CONTROL_RELEASE_RECORD" | jq -c '.')" \
             '{product:$product,release_type:$release_type,version:$version,channel:$channel,source_repo:$source_repo,source_ref:$source_ref,source_sha:$source_sha,artifact_repo:$artifact_repo,artifact_name:$artifact_name,checksum:$checksum,artifact_run_id:$artifact_run_id,notes:$notes,manifest:($package_manifest + {releaseType:"base",product:"orbitfs_base",channel:$channel,artifactTag:$artifact_tag,changedFiles:$changed_files,releaseRecord:$release_record})}' > release-package/license-master-payload.json
