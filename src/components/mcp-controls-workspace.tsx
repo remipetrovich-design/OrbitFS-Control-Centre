@@ -87,6 +87,7 @@ function SettingsGroup(props:{id:string;title:string;description:string;icon:any
 export function McpControlsWorkspace({session}:{session:any}){
  const [settings,setSettings]=useState<any>(null);
  const [runtime,setRuntime]=useState<any>(null);
+ const [github,setGithub]=useState<any>(null);
  const [connections,setConnections]=useState<any>({clients:[],activeTokens:0});
  const [lockdown,setLockdown]=useState<any>(null);
  const [lockdownError,setLockdownError]=useState("");
@@ -101,7 +102,7 @@ export function McpControlsWorkspace({session}:{session:any}){
   setError("");setOauthError("");
   try{
    const config=await getMcpSettingsForPanel({data:{token:session.token}});
-   setSettings(config.settings);setRuntime(config.runtime);
+   setSettings(config.settings);setRuntime(config.runtime);setGithub(config.github);
   }catch(x:any){setError(x?.message||"Unable to load MCP settings")}
   try{
    setConnections(await getMcpConnectionsForPanel({data:{token:session.token}}));
@@ -118,6 +119,15 @@ export function McpControlsWorkspace({session}:{session:any}){
    const r=await updateMcpSettingsForPanel({data:{token:session.token,patch:{[key]:value}}});
    setSettings(r.settings);setNotice(key==="enabled"?(value?"MCP started.":"MCP stopped."):"MCP setting saved.");
   }catch(x:any){setError(x?.message||"Unable to save MCP setting")}finally{setBusy("")}
+ }
+ async function switchGithubProfile(profile:"primary"|"fallback"){
+  setBusy("github-profile");setError("");setNotice("");
+  try{
+   await updateMcpSettingsForPanel({data:{token:session.token,patch:{github_profile:profile}}});
+   const config=await getMcpSettingsForPanel({data:{token:session.token}});
+   setSettings(config.settings);setRuntime(config.runtime);setGithub(config.github);
+   setNotice(profile==="fallback"?"Temporary fallback GitHub account is now active.":"Primary GitHub account is now active.");
+  }catch(x:any){setError(x?.message||"Unable to switch GitHub profile")}finally{setBusy("")}
  }
  async function copy(value:string,label:string){try{await navigator.clipboard.writeText(value);setNotice(label+" copied.")}catch{}}
  async function refreshConnections(){try{setConnections(await getMcpConnectionsForPanel({data:{token:session.token}}));setOauthError("")}catch(x:any){setOauthError(x?.message||"OAuth connection details unavailable")}}
@@ -151,6 +161,24 @@ export function McpControlsWorkspace({session}:{session:any}){
 
   {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2.5 text-xs text-red-100">{error}</div>}
   {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2.5 text-xs text-emerald-100">{notice}</div>}
+
+  <section className="release-surface p-4">
+   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div>
+     <p className="orbit-eyebrow">GITHUB CONTROL PROFILE</p>
+     <div className="mt-1 flex flex-wrap items-center gap-2"><strong className="text-sm">Active source account</strong><span className={"orbit-status-pill "+(github?.active==="fallback"?"orbit-status-tone-warning":"orbit-status-tone-success")}>{github?.active==="fallback"?"TEMPORARY FALLBACK":"PRIMARY"}</span></div>
+     <p className="mt-2 max-w-3xl text-[11px] leading-5 text-muted-foreground">One profile controls all five repositories together: Licence Manager, Billing Store, Dev Panel, Base release source and Engine/Update release source. The inactive profile is not used for GitHub API polling or workflow dispatch.</p>
+    </div>
+    <div className="flex shrink-0 gap-2">
+     <button disabled={busy==="github-profile"||github?.active==="primary"} className={github?.active==="primary"?"button-primary":"button-secondary"} onClick={()=>void switchGithubProfile("primary")}>Primary · lucaskerim123</button>
+     <button disabled={busy==="github-profile"||github?.active==="fallback"} className={github?.active==="fallback"?"button-primary":"button-secondary"} onClick={()=>void switchGithubProfile("fallback")}>Fallback · remipetrovich-design</button>
+    </div>
+   </div>
+   {github?.profiles&&<div className="mt-3 grid gap-2 text-[10px] text-muted-foreground sm:grid-cols-2">
+    <div className="rounded-lg border border-border/60 p-2"><b className="text-foreground">Primary</b><div>1 Licence Manager · 2 Billing · 3 Dev Panel · 4 Base/base-release · 5 Engine/UPDATE_RELEASE</div></div>
+    <div className="rounded-lg border border-border/60 p-2"><b className="text-foreground">Fallback</b><div>1 Licence Administration · 2 Billing Shopfront · 3 Control Centre · 4 Base System/base-release · 5 Engine/UPDATE_RELEASES</div></div>
+   </div>}
+  </section>
 
   <section className="release-surface p-4">
    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
