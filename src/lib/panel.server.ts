@@ -545,10 +545,12 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
   if(returnedReceipt&&!authoritativeReceipt){
    const reason=String(returnedReceipt?.manifest?.review_handoff?.reason||"").trim();
    const message="License Manager rejected this candidate and returned it to Dev Panel"+(reason?": "+reason:".");
-   const {error:returnError}=await sb.from("panel_release_drafts").update({
-    status:"draft",archived_at:null,last_error:message,updated_at:new Date().toISOString()
-   }).eq("id",draft.id);
-   if(returnError)throw new Error("Unable to return rejected release to Stage 1: "+returnError.message);
+   if(String(draft.status||"").toLowerCase()!=="draft"||draft.archived_at||String(draft.last_error||"")!==message){
+    const {error:returnError}=await sb.from("panel_release_drafts").update({
+     status:"draft",archived_at:null,last_error:message,updated_at:new Date().toISOString()
+    }).eq("id",draft.id);
+    if(returnError)throw new Error("Unable to return rejected release to Stage 1: "+returnError.message);
+   }
    draft.status="draft";draft.archived_at=null;draft.last_error=message;
   }
   // Keep the persisted status inside the existing database constraint.
