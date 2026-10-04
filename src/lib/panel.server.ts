@@ -1098,7 +1098,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   const minimumBaseVersion=String(data.minimumBaseVersion||"").trim();
   const protocol=Number(data.protocol||"");
   if(!parseSemVer(minimumBaseVersion))throw new Error("Minimum Base version must be valid SemVer.");
-  if(!Number.isInteger(protocol)||protocol<1||protocol>100)throw new Error("Minimum deployer protocol must be an integer from 1 to 100.");
+  if(!Number.isInteger(protocol)||protocol<1||protocol>100)throw new Error("Minimum Updater protocol must be an integer from 1 to 100.");
   const baseChannel=ENGINE_BASE_COMPATIBILITY_CHANNEL;
   const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(baseChannel)}&type=base&include_archived=false`);
   const publishedBases=(baseResult?.releases||[]).filter((r:any)=>{
@@ -1201,7 +1201,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   components: selectedComponents,
   minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0.0") : null,
   baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
-  minimumDeployerProtocol: data.type === "engine" ? (data.protocol || "1") : null,
+  minimumUpdaterProtocol: data.type === "engine" ? (data.protocol || "2") : null,
   notes: data.notes.trim(),
   changelogTemplate: data.changelogTemplate,
   generatedAt: new Date().toISOString(),
@@ -1216,7 +1216,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   previous_source_commit:previousSourceCommit,
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
- if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_deployer_protocol:data.protocol||"1"});
+ if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_updater_protocol:data.protocol||"2"});
  const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
