@@ -1537,7 +1537,6 @@ const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"produc
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
 const REPOSITORY_SYNC_WORKFLOW="sync-github-mirrors.yml";
-const DATABASE_PACKAGE_SYNC_WORKFLOW="sync-database-packages.yml";
 
 async function repositorySyncConfig(){
  const profiles=githubProfileDefinitions();
@@ -1585,68 +1584,6 @@ export const runRepositorySync=createServerFn({method:"POST"}).handler(async({da
  }
  return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:"Repository sync queued: "+cfg.sourceOwner+" → "+cfg.targetOwner+"."};
 });
-export const getDatabasePackageSyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
- requireOperationsUser(data.token);
- const cfg=await repositorySyncConfig();
- const profile=await activeGithubProfile();
- const [registry,runRows]=await Promise.all([
-  licenseMaster("/database-packages").catch((error:any)=>({ok:false,error:String(error?.message||error),packages:[]})),
-  repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+DATABASE_PACKAGE_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}))
- ]);
- const rows=Array.isArray(registry?.packages)?registry.packages:[];
- const expected=[
-  {component:"base",sourceRepo:profile.base.repo},
-  {component:"engine-shared",sourceRepo:profile.engine.repo},
-  {component:"mcp",sourceRepo:profile.engine.repo},
-  {component:"apex",sourceRepo:profile.engine.repo},
-  {component:"studio",sourceRepo:profile.engine.repo},
- ];
- const packages=expected.map((expectedRow:any)=>{
-  const current=rows.find((row:any)=>row.component===expectedRow.component&&row.status==="current"&&row.source_repo===expectedRow.sourceRepo)||null;
-  return {
-   ...expectedRow,
-   ok:Boolean(current),
-   id:current?.id||null,
-   sourceCommit:current?.source_commit||null,
-   databaseSchemaVersion:current?.database_schema_version??null,
-   publishedAt:current?.published_at||null,
-   status:current?.status||"missing"
-  };
- });
- const runs=Array.isArray(runRows?.workflow_runs)?runRows.workflow_runs:[];
- const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
- const active=runs.filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase())).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
- return {
-  registryOnline:registry?.ok!==false,
-  registryError:registry?.ok===false?registry.error||"Database package registry unavailable":null,
-  allCurrent:packages.every((row:any)=>row.ok),
-  packages,
-  activeRun:cleanRepositorySyncRun(active),
-  latestRun:cleanRepositorySyncRun(latest),
-  controlRepo:cfg.controlRepo
- };
-});
-export const runDatabasePackageSync=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;scope?:"all"|"base"|"engine"}})=>{
- requireOperationsUser(data.token);
- const cfg=await repositorySyncConfig();
- const scope=["base","engine"].includes(String(data.scope||""))?String(data.scope):"all";
- const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+DATABASE_PACKAGE_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
- const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
- if(active)return {ok:true,alreadyRunning:true,run:cleanRepositorySyncRun(active),message:"Database package synchronization is already running."};
- const startedAt=Date.now();
- await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+DATABASE_PACKAGE_SYNC_WORKFLOW+"/dispatches",{
-  method:"POST",
-  body:JSON.stringify({ref:"main",inputs:{confirmation:"SYNC_DATABASE",scope}})
- });
- let run:any=null;
- for(let attempt=0;attempt<8&&!run;attempt++){
-  await new Promise(resolve=>setTimeout(resolve,700));
-  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+DATABASE_PACKAGE_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
-  run=(result?.workflow_runs||[]).filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=startedAt-5000).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
- }
- return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:"Database package synchronization queued for "+scope+"."};
-});
-
 type OperationsSystem="baseSource"|"engineSource"|"licenseManager"|"billingStore";
 
 async function operationsRepos(){
