@@ -249,7 +249,7 @@ jobs:
               value=normalize(value,licenseRepos,targetLicense);
               value=normalize(value,billingRepos,targetBilling);
               value=normalize(value,controlRepos,targetControl);
-              if(p==='lib/core/releases.ts'){
+              if(p==='lib/core/releases.ts'||p==='app/api/v1/engine-bootstrap/route.ts'){
                 value=value.replace(/ORBITFS_(?:FALLBACK_GITHUB_TOKEN|RELEASE_DISPATCH_TOKEN)/g,targetTokenEnv);
               }
               if(p==='app/layout.tsx'){
