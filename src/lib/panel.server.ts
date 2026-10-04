@@ -88,21 +88,12 @@ function compareSemVer(left:string,right:string){
 
 function detectUpdateComponents(files:any[]){
  const out:string[]=[];
- const add=(value:string)=>{if(["base","apex","mcp","studio"].includes(value)&&!out.includes(value))out.push(value)};
+ const add=(value:string)=>{if(["apex","mcp","studio"].includes(value)&&!out.includes(value))out.push(value)};
  for(const item of files||[]){
   const path=String(item?.filename||item?.file||"").toLowerCase().replaceAll("\\","/");
   const migration=path.match(/^supabase\/migrations\/(shared|base|apex|mcp|studio)\/\d{14}_[a-z0-9._-]+\.sql$/i);
   const sourcePath=path.startsWith("src/")||/^(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|\.npmrc)$/.test(path);
-  if(path.startsWith("updates/base/overlay/")&&!path.endsWith("/.gitkeep")&&!path.endsWith(".gitkeep"))add("base");
-  if(path==="updates/base/delete.txt"){
-   const patch=String(item?.patch||"");
-   const addsRealDeletion=patch.split("\n").some((line:string)=>line.startsWith("+")&&!line.startsWith("+++")&&Boolean(line.slice(1).trim())&&!line.slice(1).trim().startsWith("#"));
-   // A complete tree diff can detect this file even when GitHub omits patch
-   // metadata after its compare-file cap. In that case prefer a conservative
-   // Base target rather than silently missing a deletion instruction.
-   if(addsRealDeletion||(!patch&&String(item?.status||"").toLowerCase()!=="removed"))add("base");
-  }
-  if(migration&&migration[1]!=="shared")add(migration[1].toLowerCase());
+  if(migration&&["apex","mcp","studio"].includes(migration[1].toLowerCase()))add(migration[1].toLowerCase());
   if(path.includes("/addons/apex/"))add("apex");
   if(path.includes("/addons/mcp/"))add("mcp");
   if(path.includes("/addons/studio/"))add("studio");
