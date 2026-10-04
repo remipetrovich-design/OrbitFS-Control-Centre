@@ -1346,7 +1346,7 @@ export async function clearReleaseStateCore(data:{type:"base"|"engine";version:s
  const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
  const releases=(Array.isArray(result?.releases)?result.releases:[]).filter((r:any)=>String(r.version||"")===version&&String(r.channel||"stable").toLowerCase()===channel&&String(r.release_type||"").toLowerCase()===releaseType);
  const published=releases.find((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at);
- if(published)throw new Error(`v${version} is currently published. Unpublish it first; published history is never deleted.`);
+ if(published)throw new Error(`v${version} is currently published. Unpublish or withdraw it first; only the currently published state is protected.`);
  const sb=authClient();
  const {data:drafts,error:draftReadError}=await sb.from("panel_release_drafts").select("id,status,last_run_id").eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftReadError)throw new Error("Unable to inspect Stage 1 draft state: "+draftReadError.message);
