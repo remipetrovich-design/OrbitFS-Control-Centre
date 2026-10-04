@@ -234,7 +234,7 @@ async function initialEngineSourceBaseline(head:string){
  if(String(parsed?.mode||"")!=="snapshot")throw new Error("Engine first Update baseline must use snapshot mode.");
  if(String(parsed?.sourceRepository||"")!==ENGINE_REPO||String(parsed?.releaseBranch||"")!==ENGINE_REF)throw new Error("Engine update baseline declaration does not match the configured Update source.");
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(initialReleaseVersion))throw new Error("Engine update baseline declaration is missing a valid initialReleaseVersion");
- if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the exact main Update snapshot SHA.");
+ if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the exact UPDATE_RELEASE snapshot SHA.");
  return {sha:head,ref:"release/update-baseline.json",initialReleaseVersion,locked:true,mode:"snapshot",components:["apex","mcp","studio"]};
 }
 
