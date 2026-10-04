@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,ChevronRight,ExternalLink,FileCode2,Github,Loader2,Play,RefreshCw,Server,ShieldCheck,Terminal,XCircle,Zap} from "lucide-react";
-import {getOperationsState,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
+import {getDatabasePackageSyncState,getOperationsState,getOperationsScan,getRepositorySyncState,runDatabasePackageSync,runOperation,runRepositorySync} from "@/lib/panel.server";
 
 const SYSTEMS=[
  {key:"licenseManager",label:"Custom License Manager"},
@@ -24,6 +24,7 @@ export function OperationsWorkspace({session}:{session:any}){
  const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:true,billingStore:true});
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
  const [syncState,setSyncState]=useState<any>(null);
+ const [databaseSync,setDatabaseSync]=useState<any>(null);
 
  const load=useCallback(async(silent=false)=>{
   if(!silent)setLoading(true);
@@ -37,8 +38,13 @@ export function OperationsWorkspace({session}:{session:any}){
   catch(x:any){setError(x.message||"Unable to load repository sync state.")}
  },[session.token]);
 
+ const loadDatabaseSync=useCallback(async()=>{
+  try{const r=await getDatabasePackageSyncState({data:{token:session.token}});setDatabaseSync(r)}
+  catch(x:any){setError(x.message||"Unable to load database package state.")}
+ },[session.token]);
+
  const refreshAll=async()=>{
-  setLoading(true);setError("");void loadSync();
+  setLoading(true);setError("");void loadSync();void loadDatabaseSync();
   try{
    const [state,...scanResults]=await Promise.all([
     getOperationsState({data:{token:session.token}}),
@@ -52,8 +58,11 @@ export function OperationsWorkspace({session}:{session:any}){
 
  useEffect(()=>{void load()},[load]);
  useEffect(()=>{void loadSync()},[loadSync]);
+ useEffect(()=>{void loadDatabaseSync()},[loadDatabaseSync]);
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
  useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),15000);return()=>clearInterval(t)},[syncLive,loadSync]);
+ const databaseSyncLive=Boolean(databaseSync?.activeRun&&databaseSync.activeRun.status!=="completed");
+ useEffect(()=>{if(!databaseSyncLive)return;const t=setInterval(()=>void loadDatabaseSync(),15000);return()=>clearInterval(t)},[databaseSyncLive,loadDatabaseSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
  useEffect(()=>{const t=setInterval(()=>void load(true),live?15000:60000);return()=>clearInterval(t)},[live,load]);
 
@@ -81,6 +90,18 @@ export function OperationsWorkspace({session}:{session:any}){
    setNotice(r.message||"Repository sync queued.");
    await loadSync();
   }catch(x:any){setError(x.message||"Unable to start repository sync.")}
+  finally{setBusy("")}
+ };
+
+ const syncDatabasePackages=async(scope:"all"|"base"|"engine"="all")=>{
+  const label=scope==="all"?"Base + Engine/MCP/APEX/Studio":scope==="base"?"Base":"Shared Engine + MCP/APEX/Studio";
+  if(!window.confirm("Rebuild and publish the current customer database packages for "+label+"? Existing customer databases are not reset; this updates the package authority used by fresh deploys and the inner deployer."))return;
+  setBusy("database-sync-"+scope);setError("");setNotice("");
+  try{
+   const r=await runDatabasePackageSync({data:{token:session.token,scope}});
+   setNotice(r.message||"Database package synchronization queued.");
+   await loadDatabaseSync();
+  }catch(x:any){setError(x.message||"Unable to synchronize database packages.")}
   finally{setBusy("")}
  };
 
@@ -128,6 +149,43 @@ export function OperationsWorkspace({session}:{session:any}){
     <div className="flex flex-wrap items-center gap-2">
      {syncState?.latestRun?.html_url&&<a className="button-secondary" href={syncState.latestRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last sync</a>}
      <button className="button-primary" onClick={()=>void syncRepositories()} disabled={!syncState||!!busy||syncLive}>{busy==="repository-sync"?<Loader2 size={13} className="animate-spin"/>:<RefreshCw size={13}/>} {syncState?.buttonLabel||"Sync repositories"}</button>
+    </div>
+   </div>
+  </section>
+
+  <section className="release-surface overflow-hidden">
+   <div className="orbit-section-bar">
+    <div className="orbit-section-head"><span className="orbit-section-icon"><Server size={15}/></span><div><h2>Central database package authority</h2><p>One verified source feeds Base, Shared Engine, MCP, APEX and Studio packages. Fresh customer deploys and the inner deployer consume published snapshots; they do not require the central source database to be online at deployment time.</p></div></div>
+    <Pill text={databaseSyncLive?"SYNCING":databaseSync?.registryOnline===false?"OFFLINE":databaseSync?.allCurrent?"SYNCED":"ACTION NEEDED"}/>
+   </div>
+   <div className="p-4">
+    <div className="mx-auto max-w-3xl rounded-xl border bg-background/50 p-4 text-center">
+     <p className="text-[10px] font-bold tracking-[.14em] text-muted-foreground">CENTRAL DATABASE / PACKAGE SOURCE</p>
+     <p className="mt-2 text-sm font-semibold">{databaseSync?.registryOnline===false?"Registry unavailable — published release packages remain usable":"Authoritative package registry + source repositories"}</p>
+     <p className="mt-1 text-[10px] leading-5 text-muted-foreground">{databaseSync?.registryError||"Rebuilds are generated from the current Base and Engine source commits, then published as immutable customer-facing database packages."}</p>
+    </div>
+    <div className="py-2 text-center text-lg text-muted-foreground">↓</div>
+    <div className="grid gap-2 md:grid-cols-5">
+     {(databaseSync?.packages||[
+      {component:"base",status:"loading"},{component:"engine-shared",status:"loading"},{component:"mcp",status:"loading"},{component:"apex",status:"loading"},{component:"studio",status:"loading"}
+     ]).map((row:any)=><div key={row.component} className="rounded-xl border bg-background/40 p-3">
+      <div className="flex items-center justify-between gap-2"><p className="text-[10px] font-bold tracking-[.12em]">{String(row.component).replace("engine-shared","SHARED ENGINE").toUpperCase()}</p><Pill text={row.ok?"CURRENT":String(row.status||"MISSING").toUpperCase()}/></div>
+      <p className="mt-2 truncate font-mono text-[9px] text-muted-foreground">{row.sourceCommit?String(row.sourceCommit).slice(0,12):"no current package"}</p>
+      <p className="mt-1 text-[9px] text-muted-foreground">Schema {row.databaseSchemaVersion??"—"}{row.publishedAt?" · "+time(row.publishedAt):""}</p>
+     </div>)}
+    </div>
+    <div className="py-2 text-center text-lg text-muted-foreground">↓</div>
+    <div className="rounded-xl border bg-background/40 p-3">
+     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div><p className="text-xs font-semibold">Customer deployers / inner deployer</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">Fresh Base deployments use the Base release snapshot. Shared Engine and add-ons use their packaged migration contracts. The central authority is needed to regenerate/publish packages, not to execute an already-published deployment.</p></div>
+      <div className="flex flex-wrap gap-2">
+       <button className="button-secondary" onClick={()=>void loadDatabaseSync()} disabled={!!busy}><RefreshCw size={13}/>Verify</button>
+       <button className="button-secondary" onClick={()=>void syncDatabasePackages("base")} disabled={!!busy||databaseSyncLive}>{busy==="database-sync-base"?<Loader2 size={13} className="animate-spin"/>:<RefreshCw size={13}/>}Rebuild Base</button>
+       <button className="button-secondary" onClick={()=>void syncDatabasePackages("engine")} disabled={!!busy||databaseSyncLive}>{busy==="database-sync-engine"?<Loader2 size={13} className="animate-spin"/>:<RefreshCw size={13}/>}Rebuild Engine/add-ons</button>
+       <button className="button-primary" onClick={()=>void syncDatabasePackages("all")} disabled={!!busy||databaseSyncLive}>{busy==="database-sync-all"?<Loader2 size={13} className="animate-spin"/>:<Zap size={13}/>}Force sync all</button>
+      </div>
+     </div>
+     {databaseSync?.latestRun&&<p className="mt-3 text-[9px] text-muted-foreground">Last database sync run #{databaseSync.latestRun.run_number} · {databaseSync.latestRun.status}{databaseSync.latestRun.conclusion?" · "+databaseSync.latestRun.conclusion:""}{databaseSync.latestRun.html_url?" · workflow available":""}</p>}
     </div>
    </div>
   </section>
