@@ -478,7 +478,18 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
  const publishedKeys=new Set(authoritativeRows.filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
- const visibleDrafts=(drafts||[]).filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
+ const registryKeys=new Set(authoritativeRows.map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const orphanedHandoffs=(drafts||[]).filter((d:any)=>
+  String(d.status||"").toLowerCase()==="handed_off"&&
+  !registryKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase())
+ );
+ const orphanIds=new Set(orphanedHandoffs.map((d:any)=>String(d.id)));
+ for(const orphan of orphanedHandoffs){
+  await sb.from("panel_release_events").delete().eq("release_version",String(orphan.version||"")).eq("release_type",String(orphan.release_type||"")).eq("channel",String(orphan.channel||"stable").toLowerCase());
+  await sb.from("panel_release_drafts").delete().eq("id",orphan.id);
+ }
+ const activeDrafts=(drafts||[]).filter((d:any)=>!orphanIds.has(String(d.id)));
+ const visibleDrafts=activeDrafts.filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
  // Refresh persisted in-flight attempts from GitHub, rather than assuming
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
@@ -660,17 +671,17 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
  const sb=authClient();
  const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("id",data.draftId).single();
  if(readError||!existing)throw new Error("Release draft was not found.");
- // Only local orphan cleanup: never delete a draft backed by a
- // License Manager release, and never delete any unfinished GitHub run.
+ // Published is the only protected release state. Any authoritative
+ // candidate that is not currently published may be deleted with its Stage 1 draft.
  const releaseType=String(existing.release_type||"")==="base"?"base":"update";
  const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(String(existing.channel||"stable"))}&type=${releaseType}&include_archived=true`);
  const matches=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>
   String(r.version||"")===String(existing.version||"")&&
   String(r.channel||"").toLowerCase()===String(existing.channel||"").toLowerCase()&&
   String(r.release_type||releaseType).toLowerCase()===releaseType);
- const returnedMatches=matches.filter((r:any)=>!r.published_at&&String(r.review_status||"").toLowerCase()==="rejected");
- const blockingMatches=matches.filter((r:any)=>!returnedMatches.some((returned:any)=>String(returned.id)===String(r.id)));
- if(blockingMatches.length)throw new Error("License Manager still owns an active or published release for this version. Local draft deletion is blocked; open the authoritative release record instead.");
+ const publishedMatches=matches.filter((r:any)=>String(r.status||"").toLowerCase()==="published");
+ if(publishedMatches.length)throw new Error("This version is currently published. Unpublish or withdraw it before deleting the Stage 1 draft.");
+ const deletableMatches=matches.filter((r:any)=>String(r.status||"").toLowerCase()!=="published");
  const {data:attempts,error:attemptError}=await sb.from("panel_release_attempts").select("run_id,status").eq("draft_id",existing.id);
  if(attemptError)throw new Error("Unable to verify release attempts: "+attemptError.message);
  const workerRepo=releaseType==="base"?BASE_WORKER_REPO:ENGINE_REPO;
@@ -685,24 +696,19 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
    throw new Error("GitHub run #"+attempt.run_id+" is still active. Local draft deletion is blocked.");
   // Give a successful handoff time to appear in the authoritative registry.
   // Never mistake a brief ingestion delay for an orphaned local draft.
-  if(String(run?.conclusion||"").toLowerCase()==="success"&&!returnedMatches.length){
+  if(String(run?.conclusion||"").toLowerCase()==="success"&&!deletableMatches.length){
    const finishedAt=Date.parse(String(run.updated_at||run.run_started_at||""));
    if(!Number.isFinite(finishedAt)||Date.now()-finishedAt<10*60*1000)
     throw new Error("GitHub succeeded recently. Wait 10 minutes for License Manager intake, refresh, then retry local orphan cleanup if the release still has not appeared.");
   }
  }
- // GitHub is now confirmed finished. Permanent License Manager deletion below
- // remains limited to never-published releases; previously published history must
- // stay retained even when the Stage 1 draft has been returned for rework.
- for(const release of returnedMatches){
+ // GitHub is now confirmed finished. Delete every authoritative candidate that
+ // is not currently published. Published rows were rejected above.
+ for(const release of deletableMatches){
   const id=String(release.id||"");
   if(!id)continue;
-  if(!release.archived_at){
-   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Rejected candidate returned to Dev Panel and deleted with its Stage 1 draft"})});
-  }
-  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
-  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
-  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of returned rejected release "+id+".");
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Deleted with Stage 1 draft because release is not currently published"})});
+  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of non-published release "+id+".");
  }
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
@@ -734,7 +740,19 @@ export const deleteReleaseAttempt=createServerFn({method:"POST"}).handler(async(
   }).eq("id",id);
  }
  if(["queued","in_progress"].includes(status))throw new Error("A running release attempt cannot be deleted.");
- if(status==="success"||String(draft.status||"").toLowerCase()==="handed_off")throw new Error("The successful handoff attempt is retained. Delete only stale failed, cancelled or skipped attempts.");
+ const releaseType=String(draft.release_type||"")==="base"?"base":"update";
+ const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(String(draft.channel||"stable"))}&type=${releaseType}&include_archived=true`);
+ const matching=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>
+  String(r.version||"")===String(draft.version||"")&&
+  String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase()&&
+  String(r.release_type||releaseType).toLowerCase()===releaseType);
+ if(matching.some((r:any)=>String(r.status||"").toLowerCase()==="published"))throw new Error("This version is currently published. Unpublish or withdraw it before deleting release attempts.");
+ for(const release of matching.filter((r:any)=>String(r.status||"").toLowerCase()!=="published")){
+  const releaseId=String(release.id||"");
+  if(!releaseId)continue;
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(releaseId)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Release attempt deleted from Dev/Control Centre"})});
+  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of non-published release "+releaseId+".");
+ }
 
  const {error:deleteError}=await sb.from("panel_release_attempts").delete().eq("id",id);
  if(deleteError)throw new Error("Unable to delete release attempt: "+deleteError.message);
@@ -1341,37 +1359,32 @@ export async function clearReleaseStateCore(data:{type:"base"|"engine";version:s
    }catch{}
   }
  }
- const disposable=releases.filter((release:any)=>!release.published_at);
- const historical=releases.filter((release:any)=>Boolean(release.published_at));
- const reusableHistorical=historical.filter((release:any)=>String(release.status||"").toLowerCase()!=="published"&&!release.archived_at);
+ const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()!=="published");
 
  // Clear downstream presentation state first. If this cannot be confirmed, stop:
  // "clear" must never report success with stale Billing Store state left behind.
  await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
 
- for(const release of reusableHistorical){
-  await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Preserved published history archived during Dev/Control Centre clear so the version can be reused"})});
- }
  for(const release of disposable){
   const id=String(release.id);
-  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Full Dev/Control Centre clear of never-published release"})});
-  if(deleted?.deleted!==true)throw new Error(`License Manager did not confirm deletion of never-published release ${id}.`);
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Full Dev/Control Centre clear of non-published release"})});
+  if(deleted?.deleted!==true)throw new Error(`License Manager did not confirm deletion of non-published release ${id}.`);
  }
  const verify=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
- const remainingNeverPublished=(Array.isArray(verify?.releases)?verify.releases:[]).filter((r:any)=>
+ const remainingDeletable=(Array.isArray(verify?.releases)?verify.releases:[]).filter((r:any)=>
   String(r.version||"")===version&&
   String(r.channel||"stable").toLowerCase()===channel&&
   String(r.release_type||"").toLowerCase()===releaseType&&
-  !r.published_at
+  String(r.status||"").toLowerCase()!=="published"
  );
- if(remainingNeverPublished.length){
-  throw new Error(`Clear did not complete: License Manager still has ${remainingNeverPublished.length} never-published v${version} ${releaseType} release record${remainingNeverPublished.length===1?"":"s"}. Local Dev state was not deleted.`);
+ if(remainingDeletable.length){
+  throw new Error(`Clear did not complete: License Manager still has ${remainingDeletable.length} non-published v${version} ${releaseType} release record${remainingDeletable.length===1?"":"s"}. Local Dev state was not deleted.`);
  }
  const {error:eventDeleteError}=await sb.from("panel_release_events").delete().eq("release_version",version).eq("release_type",releaseType).eq("channel",channel);
  if(eventDeleteError)throw new Error("Authoritative release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
  const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftDeleteError)throw new Error("Authoritative release records were cleared, but the Stage 1 draft/attempt state could not be reset: "+draftDeleteError.message);
- return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,verifiedLicenseManagerCleanup:true,preservedHistoricalReleases:historical.length,archivedHistoricalReleases:reusableHistorical.length,deletedDrafts:(drafts||[]).length,clearedBillingStore:true,clearedLifecycleEvents:true,clearedAttemptsWithDrafts:true,warning:null};
+ return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,verifiedLicenseManagerCleanup:true,publishedReleasesPreserved:releases.filter((r:any)=>String(r.status||"").toLowerCase()==="published").length,deletedDrafts:(drafts||[]).length,clearedBillingStore:true,clearedLifecycleEvents:true,clearedAttemptsWithDrafts:true,warning:null};
 }
 
 export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
