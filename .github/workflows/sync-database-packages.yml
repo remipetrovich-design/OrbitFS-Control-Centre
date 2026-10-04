@@ -1,162 +1,17 @@
-name: Sync customer database packages
+name: Database package sync disabled
 
 on:
   workflow_dispatch:
-    inputs:
-      confirmation:
-        description: Type SYNC_DATABASE to rebuild and publish the current customer database packages
-        required: true
-        default: ""
-        type: string
-      scope:
-        description: Package group to synchronize
-        required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - base
-          - engine
 
 permissions:
   contents: read
 
-concurrency:
-  group: orbitfs-database-package-sync
-  cancel-in-progress: false
-
-env:
-  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL || 'https://incendiarynetworks.cc/api/v1' }}
-  BASE_REPO: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
-  ENGINE_REPO: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
-  EXPECTED_PROFILE: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'primary' || 'fallback' }}
-  SOURCE_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && secrets.ORBITFS_RELEASE_DISPATCH_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
-
 jobs:
-  sync:
-    name: Rebuild and publish customer database packages
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - name: Validate authority
-        shell: bash
-        env:
-          LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          test "${{ inputs.confirmation }}" = "SYNC_DATABASE" || { echo "::error::Confirmation must be SYNC_DATABASE."; exit 1; }
-          test -n "${SOURCE_TOKEN:-}" || { echo "::error::Source GitHub credential is missing."; exit 1; }
-          test -n "${LICENSE_MASTER_API_TOKEN:-}" || { echo "::error::LICENSE_MASTER_API_TOKEN is missing."; exit 1; }
-          node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
-          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
-          test "$active" = "$EXPECTED_PROFILE" || { echo "::error::Active GitHub profile is $active; expected $EXPECTED_PROFILE for $GITHUB_REPOSITORY."; exit 1; }
-
-      - name: Checkout Base
-        if: inputs.scope == 'all' || inputs.scope == 'base'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.BASE_REPO }}
-          ref: main
-          token: ${{ env.SOURCE_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 1
-          path: base-source
-
-      - name: Checkout Engine
-        if: inputs.scope == 'all' || inputs.scope == 'engine'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.ENGINE_REPO }}
-          ref: main
-          token: ${{ env.SOURCE_TOKEN }}
-          persist-credentials: false
-          fetch-depth: 1
-          path: engine-source
-
-      - name: Build Base customer snapshot and package
-        if: inputs.scope == 'all' || inputs.scope == 'base'
-        working-directory: base-source
+      - name: Use release-bound database packaging
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p .database-sync
-          source_sha="$(git rev-parse HEAD)"
-          schema_version="$(sed -n 's/^ORBITFS_SCHEMA_VERSION=//p' .env.example | head -n 1 | tr -d '"'"'"'')"
-          node tools/build-customer-schema.mjs --output supabase/customer-schema.sql --metadata .database-sync/database-schema.json
-          node tools/build-database-package.mjs             --commit "$source_sha"             --schema-version "${schema_version:-2}"             --snapshot supabase/customer-schema.sql             --metadata .database-sync/database-schema.json             --output .database-sync/base.json
-          test "$(jq -r '.sourceRepo' .database-sync/base.json)" = "$BASE_REPO"
-          jq -e '.snapshot.size > 0 and .migrationCount > 0' .database-sync/base.json >/dev/null
-
-      - name: Build Engine component packages
-        if: inputs.scope == 'all' || inputs.scope == 'engine'
-        working-directory: engine-source
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .database-sync
-          source_sha="$(git rev-parse HEAD)"
-          node tools/check-database-migrations.mjs
-          for component in engine-shared mcp apex studio; do
-            node tools/build-database-package.mjs               --component "$component"               --commit "$source_sha"               --minimum-base-schema-version 2               --output ".database-sync/$component.json"
-            test "$(jq -r '.sourceRepo' ".database-sync/$component.json")" = "$ENGINE_REPO"
-          done
-
-      - name: Publish Base package
-        if: inputs.scope == 'all' || inputs.scope == 'base'
-        working-directory: base-source
-        shell: bash
-        env:
-          LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          response="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages"             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             -H "Content-Type: application/json"             --data-binary @.database-sync/base.json)"
-          id="$(jq -r '.package.id // empty' <<<"$response")"
-          test -n "$id" || { echo "::error::License Manager did not return a Base package id."; exit 1; }
-          curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages/$id/publish"             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             -H "Content-Type: application/json" >/tmp/base-publish.json
-          jq -e '.ok == true and .package.status == "current"' /tmp/base-publish.json >/dev/null
-          echo "Base customer database package synchronized: $id"
-
-      - name: Publish Engine component packages
-        if: inputs.scope == 'all' || inputs.scope == 'engine'
-        working-directory: engine-source
-        shell: bash
-        env:
-          LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          for component in engine-shared mcp apex studio; do
-            response="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages"               -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"               -H "Content-Type: application/json"               --data-binary @".database-sync/$component.json")"
-            id="$(jq -r '.package.id // empty' <<<"$response")"
-            test -n "$id" || { echo "::error::License Manager did not return a package id for $component."; exit 1; }
-            published="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages/$id/publish"               -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"               -H "Content-Type: application/json")"
-            test "$(jq -r '.package.status // empty' <<<"$published")" = "current" || { echo "::error::$component package did not become current."; exit 1; }
-            echo "$component customer database package synchronized: $id"
-          done
-
-      - name: Verify current package set
-        shell: bash
-        env:
-          LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          result="$(curl --fail-with-body --silent --show-error "${LICENSE_MASTER_URL%/}/database-packages"             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN")"
-          node - "$result" "$BASE_REPO" "$ENGINE_REPO" <<'NODE'
-          const body=JSON.parse(process.argv[2]);
-          const baseRepo=process.argv[3],engineRepo=process.argv[4];
-          const rows=Array.isArray(body?.packages)?body.packages:[];
-          const current=rows.filter((x)=>x.status==='current');
-          const required=[
-            ['base',baseRepo],
-            ['engine-shared',engineRepo],
-            ['mcp',engineRepo],
-            ['apex',engineRepo],
-            ['studio',engineRepo],
-          ];
-          const missing=required.filter(([component,repo])=>!current.some((x)=>x.component===component&&x.source_repo===repo));
-          if(missing.length)throw new Error('Current package verification failed: '+missing.map(([c,r])=>c+'@'+r).join(', '));
-          console.log(JSON.stringify({ok:true,current:required.map(([component,repo])=>{
-            const row=current.find((x)=>x.component===component&&x.source_repo===repo);
-            return {component,sourceRepo:repo,sourceCommit:row.source_commit,databaseSchemaVersion:row.database_schema_version,publishedAt:row.published_at};
-          })},null,2));
-          NODE
+          echo "::error::Direct database-package synchronization is disabled. Base packages are built by the Base release workflow and Engine component packages are built by the Engine release workflow so they remain source-locked, release-bound and profile-safe."
+          exit 1
