@@ -51,6 +51,17 @@ export function OperationsWorkspace({session}:{session:any}){
  };
 
  useEffect(()=>{void load()},[load]);
+ useEffect(()=>{
+  let alive=true;
+  Promise.all(SYSTEMS.map(async system=>{
+   try{return [system.key,await getOperationsScan({data:{token:session.token,system:system.key as any}})] as const}
+   catch{return [system.key,null] as const}
+  })).then(entries=>{
+   if(!alive)return;
+   setScans(Object.fromEntries(entries.filter(([,value])=>Boolean(value))));
+  });
+  return()=>{alive=false};
+ },[session.token]);
  useEffect(()=>{void loadSync()},[loadSync]);
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
  useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),15000);return()=>clearInterval(t)},[syncLive,loadSync]);
@@ -184,6 +195,7 @@ export function OperationsWorkspace({session}:{session:any}){
       </div>
       {productionCurrent&&<div className="border-t border-emerald-400/20 bg-emerald-400/5 px-4 py-3 text-[10px] text-emerald-100"><b>Production is current.</b> The latest main commit <code>{s.currentSha?.slice(0,12)}</code> matches the last successful normal or Quick deployment.</div>}
       {!productionCurrent&&s.latestDeployment&&<div className="border-t border-amber-400/20 bg-amber-400/5 px-4 py-3 text-[10px] text-amber-100"><b>Update pending.</b> Production is on <code>{s.deployedSha?.slice(0,12)||"an older commit"}</code>; main is <code>{s.currentSha?.slice(0,12)||"unknown"}</code>.</div>}
+      {!productionCurrent&&!s.latestDeployment&&<div className="border-t border-amber-400/20 bg-amber-400/5 px-4 py-3 text-[10px] text-amber-100"><b>Production baseline unavailable.</b> No successful normal or Quick deployment is recorded for this repository yet. Current main is <code>{s.currentSha?.slice(0,12)||"unknown"}</code>; repository changes below are compared as a full snapshot until a successful production deployment exists.</div>}
 
       <div className="border-t">
        <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>setConsoleOpen(v=>({...v,[system.key]:!isConsoleOpen}))}>
@@ -214,6 +226,7 @@ export function OperationsWorkspace({session}:{session:any}){
         <div className="flex items-center gap-2"><FileCode2 size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">REPOSITORY CHANGE SCAN</p><p className="mt-1 text-[9px] text-muted-foreground">Compare current main against the last successful production deployment.</p></div></div>
         <div className="flex items-center gap-2">{busy===system.key+"scan"?<Loader2 size={14} className="animate-spin"/>:scan&&<Pill text={scan.updateAvailable?`${scan.changedFileCount} FILES`:"CURRENT"}/>} {scanOpen[system.key]?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
+       {scan&&!scanOpen[system.key]&&<div className="border-t px-4 py-2 text-[10px] text-muted-foreground">{scan.updateAvailable?<><b className="text-amber-200">Not latest.</b> {scan.changedFileCount} changed file{scan.changedFileCount===1?"":"s"} since the production baseline.</>:<><b className="text-emerald-200">Latest.</b> Production matches current main.</>}</div>}
        {scan&&scanOpen[system.key]&&<div className="border-t p-3">
         <div className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-4"><div className="orbit-tech-stat"><span>Current</span><strong className="font-mono">{scan.currentSha?.slice(0,12)||"—"}</strong></div><div className="orbit-tech-stat"><span>Production baseline</span><strong className="font-mono">{scan.baselineSha?.slice(0,12)||"—"}</strong></div><div className="orbit-tech-stat"><span>Commits</span><strong>{scan.commitCount}</strong></div><div className="orbit-tech-stat"><span>Changed files</span><strong>{scan.changedFileCount}</strong></div></div>
         {(scan.commits||[]).length>0&&<div className="mt-3 overflow-hidden rounded-lg border"><div className="orbit-subhead">COMMITS <span>{scan.commits.length}</span></div>{scan.commits.slice(0,30).map((c:any)=><div className="orbit-change-row" key={c.sha}><code>{c.sha.slice(0,7)}</code><span>{c.message}</span></div>)}</div>}
