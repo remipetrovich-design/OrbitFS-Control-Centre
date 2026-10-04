@@ -168,24 +168,45 @@ jobs:
           normalize_for_target() {
             local root="$1"
             local key="$2"
-            local target_base target_engine
+            local target_base target_engine target_license target_billing target_control target_profile target_label target_token_env
             if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
               target_base="remipetrovich-design/OrbitFS-Base-System"
               target_engine="remipetrovich-design/OrbitFS_Engine"
+              target_license="remipetrovich-design/OrbitFS-License-Administration"
+              target_billing="remipetrovich-design/OrbitFS-Billing-Shopfront"
+              target_control="remipetrovich-design/OrbitFS-Control-Centre"
+              target_profile="fallback"
+              target_label="Remi fallback"
+              target_token_env="ORBITFS_FALLBACK_GITHUB_TOKEN"
             else
               target_base="lucaskerim123/V1-vercel-base"
               target_engine="lucaskerim123/V1-vercel-engine"
+              target_license="lucaskerim123/Custom-licence-manager"
+              target_billing="lucaskerim123/V2_Billing_Store"
+              target_control="lucaskerim123/Dev-panel"
+              target_profile="primary"
+              target_label="Primary"
+              target_token_env="ORBITFS_RELEASE_DISPATCH_TOKEN"
             fi
 
-            ROOT="$root" KEY="$key" TARGET_BASE_REPO="$target_base" TARGET_ENGINE_REPO="$target_engine" node <<'NODE'
+            ROOT="$root" KEY="$key" TARGET_BASE_REPO="$target_base" TARGET_ENGINE_REPO="$target_engine" TARGET_LICENSE_REPO="$target_license" TARGET_BILLING_REPO="$target_billing" TARGET_CONTROL_REPO="$target_control" TARGET_PROFILE="$target_profile" TARGET_LABEL="$target_label" TARGET_TOKEN_ENV="$target_token_env" node <<'NODE'
           const fs=require('fs');
           const path=require('path');
           const root=process.env.ROOT;
           const key=process.env.KEY;
           const targetBase=process.env.TARGET_BASE_REPO;
           const targetEngine=process.env.TARGET_ENGINE_REPO;
+          const targetLicense=process.env.TARGET_LICENSE_REPO;
+          const targetBilling=process.env.TARGET_BILLING_REPO;
+          const targetControl=process.env.TARGET_CONTROL_REPO;
+          const targetProfile=process.env.TARGET_PROFILE;
+          const targetLabel=process.env.TARGET_LABEL;
+          const targetTokenEnv=process.env.TARGET_TOKEN_ENV;
           const baseRepos=['lucaskerim123/V1-vercel-base','remipetrovich-design/OrbitFS-Base-System'];
           const engineRepos=['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'];
+          const licenseRepos=['lucaskerim123/Custom-licence-manager','remipetrovich-design/OrbitFS-License-Administration'];
+          const billingRepos=['lucaskerim123/V2_Billing_Store','remipetrovich-design/OrbitFS-Billing-Shopfront'];
+          const controlRepos=['lucaskerim123/Dev-panel','remipetrovich-design/OrbitFS-Control-Centre'];
           const read=(p)=>fs.readFileSync(path.join(root,p),'utf8');
           const write=(p,v)=>fs.writeFileSync(path.join(root,p),v);
           const normalize=(value,list,target)=>list.reduce((out,item)=>out.split(item).join(target),value).split('UPDATE_RELEASES').join('UPDATE_RELEASE');
@@ -208,6 +229,38 @@ jobs:
             data.releaseBranch='UPDATE_RELEASE';
             if(typeof data.note==='string')data.note=data.note.split('UPDATE_RELEASES').join('UPDATE_RELEASE');
             write(baseline,JSON.stringify(data,null,2)+'\n');
+          } else if(key==='license'){
+            const files=[
+              'app/layout.tsx',
+              'app/api/v1/releases/route.ts',
+              'app/api/v1/license/validate/route.ts',
+              'app/api/v1/engine-bootstrap/route.ts',
+              'lib/core/database-packages.ts',
+              'lib/core/releases.ts',
+              'scripts/release-manifest.mjs',
+              'scripts/release-manifest.test.mjs',
+              'database/migrations/20261004100000_license_manager_github_profile.sql'
+            ];
+            for(const p of files){
+              if(!fs.existsSync(path.join(root,p)))throw new Error('Missing target-specific License Manager identity file: '+p);
+              let value=read(p);
+              value=normalize(value,baseRepos,targetBase);
+              value=normalize(value,engineRepos,targetEngine);
+              value=normalize(value,licenseRepos,targetLicense);
+              value=normalize(value,billingRepos,targetBilling);
+              value=normalize(value,controlRepos,targetControl);
+              if(p==='lib/core/releases.ts'){
+                value=value.replace(/ORBITFS_(?:FALLBACK_GITHUB_TOKEN|RELEASE_DISPATCH_TOKEN)/g,targetTokenEnv);
+              }
+              if(p==='app/layout.tsx'){
+                value=value.replace(/const LOCAL_PROFILE='(?:primary|fallback)' as const;/,\`const LOCAL_PROFILE='\${targetProfile}' as const;\`);
+                value=value.replace(/const LOCAL_LABEL='[^']*';/,\`const LOCAL_LABEL='\${targetLabel}';\`);
+              }
+              if(p==='database/migrations/20261004100000_license_manager_github_profile.sql'){
+                value=value.replace(/default '(?:primary|fallback)'/,\`default '\${targetProfile}'\`);
+              }
+              write(p,value);
+            }
           }
           NODE
           }
