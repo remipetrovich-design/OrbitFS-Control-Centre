@@ -56,7 +56,7 @@ function Index() {
   const [commits, setCommits] = useState<any[]>([]);
   const [components, setComponents] = useState<string[]>([]);
   const [minBase, setMinBase] = useState("");
-  const [protocol, setProtocol] = useState("1");
+  const [protocol, setProtocol] = useState("2");
 
   const [run, setRun] = useState<any>(null);
   const [runRepo, setRunRepo] = useState("");
