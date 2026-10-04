@@ -951,8 +951,15 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
  const releaseSha=String(releaseBranch?.object?.sha||"");
  if(!/^[a-f0-9]{40}$/i.test(sourceSha))throw new Error(`Could not resolve ${repo}@main.`);
  const allRuns=Array.isArray(runs?.workflow_runs)?runs.workflow_runs:[];
+ const activeCutoff=Date.now()-(30*60*1000);
  const activeRun=allRuns
-  .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
+  .filter((run:any)=>{
+   const status=String(run?.status||"").toLowerCase();
+   const createdAt=new Date(run?.created_at||run?.run_started_at||0).getTime();
+   return ["queued","in_progress","waiting","requested","pending"].includes(status)&&
+    String(run?.head_sha||"")===sourceSha&&
+    Number.isFinite(createdAt)&&createdAt>=activeCutoff;
+  })
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  const latestRun=[...allRuns].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  return {
@@ -1011,8 +1018,15 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  const releaseSha=String(releaseBranch?.object?.sha||"");
  if(!/^[a-f0-9]{40}$/i.test(sourceSha))throw new Error(`Could not resolve ${repo}@main.`);
 
+ const activeCutoff=Date.now()-(30*60*1000);
  const active=(runs?.workflow_runs||[])
-  .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
+  .filter((run:any)=>{
+   const status=String(run?.status||"").toLowerCase();
+   const createdAt=new Date(run?.created_at||run?.run_started_at||0).getTime();
+   return ["queued","in_progress","waiting","requested","pending"].includes(status)&&
+    String(run?.head_sha||"")===sourceSha&&
+    Number.isFinite(createdAt)&&createdAt>=activeCutoff;
+  })
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
  if(active){
   return {ok:true,alreadyRunning:true,repo,sourceRef,releaseRef,sourceSha:String(active.head_sha||sourceSha),releaseSha,runId:active.id||null,runUrl:active.html_url||null,status:active.status||"in_progress"};
