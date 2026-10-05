@@ -489,12 +489,18 @@ jobs:
           fi
           release_id="$(jq -r '.release.id // .release_id // empty' <<<"$response")"
           test -n "$release_id" || { echo "$response"; echo "::error::License Manager did not return a release id"; exit 1; }
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
           validation_status="$(jq -r '.release.manifest.validation.status // empty' <<<"$response" 2>/dev/null || true)"
           if [ "$validation_status" != "passed" ]; then
             echo "$response"
             failed_checks="$(jq -r '[.release.manifest.validation.checks[]? | select(.ok != true) | (.key + ": " + .message)] | join("; ")' <<<"$response" 2>/dev/null || true)"
-            echo "::error::License Manager automatic Stage 2 validation failed${failed_checks:+: $failed_checks}"
-            exit 1
+            failed_keys="$(jq -r '[.release.manifest.validation.checks[]? | select(.ok != true) | .key] | unique | join(",")' <<<"$response" 2>/dev/null || true)"
+            if [ "$failed_keys" = "ci" ]; then
+              echo "::notice::License Manager intake succeeded. CI verification is deferred until this GitHub Actions run completes."
+            else
+              echo "::error::License Manager automatic Stage 2 validation failed${failed_checks:+: $failed_checks}"
+              exit 1
+            fi
+          else
+            echo "License Manager intake and automatic Stage 2 validation passed."
           fi
-          echo "id=$release_id" >> "$GITHUB_OUTPUT"
-          echo "License Manager intake and automatic Stage 2 validation passed."
