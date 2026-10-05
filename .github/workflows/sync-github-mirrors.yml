@@ -253,11 +253,11 @@ jobs:
                 value=value.replace(/ORBITFS_(?:FALLBACK_GITHUB_TOKEN|RELEASE_DISPATCH_TOKEN)/g,targetTokenEnv);
               }
               if(p==='app/layout.tsx'){
-                value=value.replace(/const LOCAL_PROFILE='(?:primary|fallback)' as const;/,\`const LOCAL_PROFILE='\${targetProfile}' as const;\`);
-                value=value.replace(/const LOCAL_LABEL='[^']*';/,\`const LOCAL_LABEL='\${targetLabel}';\`);
+                value=value.replace(/const LOCAL_PROFILE='(?:primary|fallback)' as const;/,"const LOCAL_PROFILE='"+targetProfile+"' as const;");
+                value=value.replace(/const LOCAL_LABEL='[^']*';/,"const LOCAL_LABEL='"+targetLabel.replace(/'/g,"\\'")+"';");
               }
               if(p==='database/migrations/20261004100000_license_manager_github_profile.sql'){
-                value=value.replace(/default '(?:primary|fallback)'/,\`default '\${targetProfile}'\`);
+                value=value.replace(/default '(?:primary|fallback)'/,"default '"+targetProfile+"'");
               }
               write(p,value);
             }
