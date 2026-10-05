@@ -292,9 +292,8 @@ jobs:
             echo "::group::Prepare $key"
             git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
 
-            # Convert both temporary trees to the target repository identity before
-            # comparing them. Shared logic is still compared byte-for-byte, while
-            # repository-specific names stay correct on each GitHub profile.
+            # Convert both temporary trees to the target repository identity.
+            # The explicitly selected source direction is authoritative for this run.
             normalize_for_target "$src" "$key" true
             normalize_for_target "$dst" "$key" false
             # Report target-side drift, but do not block: the explicitly selected
