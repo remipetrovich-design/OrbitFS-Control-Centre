@@ -296,9 +296,7 @@ jobs:
             # The explicitly selected source direction is authoritative for this run.
             normalize_for_target "$src" "$key" true
             normalize_for_target "$dst" "$key" false
-            # Report target-side drift, but do not block: the explicitly selected
-            # source direction is authoritative for this mirror run.
-            assert_no_target_only_drift "$src" "$dst" "$key"
+            echo "::notice::$key target content will be reconciled to the explicitly selected source direction."
 
             excludes=(--exclude=".git/" --exclude=".github/workflows/")
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
