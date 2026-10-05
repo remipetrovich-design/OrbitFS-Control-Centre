@@ -218,7 +218,7 @@ jobs:
           const billingRepos=['lucaskerim123/V2_Billing_Store','remipetrovich-design/OrbitFS-Billing-Shopfront'];
           const controlRepos=['lucaskerim123/Dev-panel','remipetrovich-design/OrbitFS-Control-Centre'];
           const read=(p)=>fs.readFileSync(path.join(root,p),'utf8');
-          const write=(p,v)=>fs.writeFileSync(path.join(root,p),v);
+          const write=(p,v)=>{const file=path.join(root,p);if(fs.readFileSync(file,'utf8')!==v)fs.writeFileSync(file,v);};
           const normalize=(value,list,target)=>list.reduce((out,item)=>out.split(item).join(target),value).split('UPDATE_RELEASES').join('UPDATE_RELEASE');
 
           if(key==='base'){
