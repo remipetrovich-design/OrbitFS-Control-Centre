@@ -93,6 +93,7 @@ jobs:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
+          fetch-depth: 0
           path: target-base
 
       - name: Checkout Engine source
@@ -109,6 +110,7 @@ jobs:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
+          fetch-depth: 0
           path: target-engine
 
       - name: Checkout License source
@@ -125,6 +127,7 @@ jobs:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-License-Administration' || 'lucaskerim123/Custom-licence-manager' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
+          fetch-depth: 0
           path: target-license
 
       - name: Checkout Billing source
@@ -141,6 +144,7 @@ jobs:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Billing-Shopfront' || 'lucaskerim123/V2_Billing_Store' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
+          fetch-depth: 0
           path: target-billing
 
       - name: Checkout Control source
@@ -157,6 +161,7 @@ jobs:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Control-Centre' || 'lucaskerim123/Dev-panel' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
+          fetch-depth: 0
           path: target-control
 
       - name: Prepare and preflight all five targets
@@ -224,13 +229,17 @@ jobs:
           } else if(key==='engine'){
             const pkg='tools/build-database-package.mjs';
             const baseline='release/update-baseline.json';
-            if(!fs.existsSync(path.join(root,pkg))||!fs.existsSync(path.join(root,baseline))){if(strict)throw new Error('Missing target-specific Engine identity file.');return;}
-            write(pkg,normalize(read(pkg),engineRepos,targetEngine));
-            const data=JSON.parse(read(baseline));
-            data.sourceRepository=targetEngine;
-            data.releaseBranch='UPDATE_RELEASE';
-            if(typeof data.note==='string')data.note=data.note.split('UPDATE_RELEASES').join('UPDATE_RELEASE');
-            write(baseline,JSON.stringify(data,null,2)+'\n');
+            const hasEngineIdentity=fs.existsSync(path.join(root,pkg))&&fs.existsSync(path.join(root,baseline));
+            if(!hasEngineIdentity){
+              if(strict)throw new Error('Missing target-specific Engine identity file.');
+            }else{
+              write(pkg,normalize(read(pkg),engineRepos,targetEngine));
+              const data=JSON.parse(read(baseline));
+              data.sourceRepository=targetEngine;
+              data.releaseBranch='UPDATE_RELEASE';
+              if(typeof data.note==='string')data.note=data.note.split('UPDATE_RELEASES').join('UPDATE_RELEASE');
+              write(baseline,JSON.stringify(data,null,2)+'\n');
+            }
           } else if(key==='license'){
             const files=[
               'app/layout.tsx',
@@ -347,8 +356,16 @@ jobs:
             git -C "$dst" config user.email "actions@users.noreply.github.com"
             git -C "$dst" add -A -f
             if git -C "$dst" diff --cached --quiet; then
-              echo "current" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
-              echo "$key already current"
+              if git -C "$dst" log -1 --format='%s' | grep -qx 'Sync main from mirror source'; then
+                echo "current" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+                echo "$key already current and marker is present"
+              else
+                echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+                git -C "$dst" commit --allow-empty --quiet -m "Sync main from mirror source"
+                target_ref="main"
+                git -C "$dst" push --dry-run origin "HEAD:$target_ref"
+                echo "$key content is current; bootstrap marker prepared"
+              fi
             else
               echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
               git -C "$dst" commit --quiet -m "Sync main from mirror source"
@@ -382,7 +399,10 @@ jobs:
             state="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")"
             if [ "$state" = "changed" ]; then
               expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
-              git -C "$dst" push --force-with-lease="refs/heads/$target_ref:$expected" origin "HEAD:$target_ref"
+              git -C "$dst" fetch --quiet origin "$target_ref"
+              remote_before="$(git -C "$dst" rev-parse "origin/$target_ref")"
+              test "$remote_before" = "$expected" || { echo "::error::Remote $target_ref changed after preflight for $key; refusing to overwrite newer work."; exit 1; }
+              git -C "$dst" push origin "HEAD:$target_ref"
               git -C "$dst" fetch --quiet origin "$target_ref"
               test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse "origin/$target_ref")" || { echo "::error::Remote main verification failed for $key."; exit 1; }
               excludes=(--exclude=".git/" --exclude=".github/workflows/")
