@@ -1,0 +1,96 @@
+name: Validate Base Release After Packaging
+
+on:
+  workflow_run:
+    workflows:
+      - Package OrbitFS Base Release
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Package OrbitFS Base Release run id to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orbitfs-base-post-package-validation-${{ github.event.workflow_run.id || inputs.run_id }}
+  cancel-in-progress: false
+
+env:
+  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL || 'https://incendiarynetworks.cc/api/v1' }}
+
+jobs:
+  validate:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. Post-package validation is disabled."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate completed Base candidate
+        if: steps.profile.outputs.run == 'true'
+        shell: bash
+        env:
+          LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          MANUAL_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          test -n "$LICENSE_MASTER_API_TOKEN" || { echo "::error::Missing LICENSE_MASTER_API_TOKEN"; exit 1; }
+          node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            run_id="$MANUAL_RUN_ID"
+          else
+            run_id="$WORKFLOW_RUN_ID"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "::error::Invalid packaging run id: $run_id"; exit 1; }
+
+          releases="$(curl --fail-with-body --silent --show-error --retry 3 --retry-delay 2             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             "${LICENSE_MASTER_URL%/}/releases?product=orbitfs_base&type=base&include_archived=true")"
+
+          release_id="$(printf '%s' "$releases" | jq -r --argjson run "$run_id"             '[.releases[]? | select((.artifact_run_id // 0) == $run)] | sort_by(.created_at) | last | .id // empty')"
+          test -n "$release_id" || {
+            echo "::error::No Base release candidate was recorded for packaging run $run_id."
+            exit 1
+          }
+
+          response_file="$(mktemp)"
+          status="$(curl --silent --show-error --retry 3 --retry-delay 2             --output "$response_file" --write-out '%{http_code}'             -X POST             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             -H "Content-Type: application/json"             "${LICENSE_MASTER_URL%/}/releases/$release_id/validate")"
+          response="$(cat "$response_file")"
+          rm -f "$response_file"
+
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "$response"
+            failed_checks="$(printf '%s' "$response" | jq -r '[.validation.checks[]? | select(.ok != true) | (.key + ": " + .message)] | join("; ")' 2>/dev/null || true)"
+            echo "::error::Post-package License Manager validation failed${failed_checks:+: $failed_checks}"
+            exit 1
+          fi
+
+          validation_status="$(printf '%s' "$response" | jq -r '.validation.status // empty')"
+          test "$validation_status" = "passed" || {
+            echo "$response"
+            echo "::error::License Manager did not return a passed validation."
+            exit 1
+          }
+          echo "Base release $release_id passed post-package validation for completed run $run_id."
