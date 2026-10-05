@@ -80,7 +80,7 @@ jobs:
           }
 
       - name: Checkout Base source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
           ref: main
@@ -88,7 +88,7 @@ jobs:
           persist-credentials: false
           path: source-base
       - name: Checkout Base target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
           ref: main
@@ -97,7 +97,7 @@ jobs:
           path: target-base
 
       - name: Checkout Engine source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
           ref: main
@@ -105,7 +105,7 @@ jobs:
           persist-credentials: false
           path: source-engine
       - name: Checkout Engine target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
           ref: main
@@ -114,7 +114,7 @@ jobs:
           path: target-engine
 
       - name: Checkout License source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/Custom-licence-manager' || 'remipetrovich-design/OrbitFS-License-Administration' }}
           ref: main
@@ -122,7 +122,7 @@ jobs:
           persist-credentials: false
           path: source-license
       - name: Checkout License target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-License-Administration' || 'lucaskerim123/Custom-licence-manager' }}
           ref: main
@@ -131,7 +131,7 @@ jobs:
           path: target-license
 
       - name: Checkout Billing source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V2_Billing_Store' || 'remipetrovich-design/OrbitFS-Billing-Shopfront' }}
           ref: main
@@ -139,7 +139,7 @@ jobs:
           persist-credentials: false
           path: source-billing
       - name: Checkout Billing target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Billing-Shopfront' || 'lucaskerim123/V2_Billing_Store' }}
           ref: main
@@ -148,7 +148,7 @@ jobs:
           path: target-billing
 
       - name: Checkout Control source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/Dev-panel' || 'remipetrovich-design/OrbitFS-Control-Centre' }}
           ref: main
@@ -156,7 +156,7 @@ jobs:
           persist-credentials: false
           path: source-control
       - name: Checkout Control target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Control-Centre' || 'lucaskerim123/Dev-panel' }}
           ref: main
