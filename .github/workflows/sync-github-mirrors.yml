@@ -392,6 +392,16 @@ jobs:
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # Re-check every target before the first push so a late edit cannot
+          # leave the five repositories half-synced.
+          for key in base engine license billing control; do
+            dst="target-$key"
+            expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
+            git -C "$dst" fetch --quiet origin main
+            remote_before="$(git -C "$dst" rev-parse origin/main)"
+            test "$remote_before" = "$expected" || { echo "::error::Remote main changed after preflight for $key; refusing to start a partial five-repo sync."; exit 1; }
+          done
+
           for key in base engine license billing control; do
             src="source-$key"
             dst="target-$key"
@@ -405,6 +415,7 @@ jobs:
               git -C "$dst" push origin "HEAD:$target_ref"
               git -C "$dst" fetch --quiet origin "$target_ref"
               test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse "origin/$target_ref")" || { echo "::error::Remote main verification failed for $key."; exit 1; }
+              test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for $key."; exit 1; }
               excludes=(--exclude=".git/" --exclude=".github/workflows/")
               if [ "$key" = "control" ]; then
                 excludes+=(--exclude=".env.example")
@@ -413,7 +424,9 @@ jobs:
               test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
               echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "- ✅ $key — already current" >> "$GITHUB_STEP_SUMMARY"
+              git -C "$dst" fetch --quiet origin "$target_ref"
+              test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for current $key."; exit 1; }
+              echo "- ✅ $key — already current and marker verified" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
