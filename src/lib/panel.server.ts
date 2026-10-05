@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
-import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName} from "@/lib/github-profile";
+import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
 
 async function githubContext(){
  const profile=await activeGithubProfile();
@@ -1544,6 +1544,7 @@ const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY
 const REPOSITORY_SYNC_WORKFLOW="sync-github-mirrors.yml";
 
 async function repositorySyncConfig(){
+ await requireLocalGithubProfileActive();
  const profiles=githubProfileDefinitions();
  const side=localGithubProfileName();
  const source=side==="primary"?profiles.primary:profiles.fallback;
@@ -1720,6 +1721,7 @@ let operationsStateCache:{profile:"primary"|"fallback";value:any;expires:number}
 
 export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
+ await requireLocalGithubProfileActive();
  const profile=localGithubProfileName();
  if(operationsStateCache&&operationsStateCache.profile===profile&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
  const keys:OperationsSystem[]=["licenseManager","billingStore"];
