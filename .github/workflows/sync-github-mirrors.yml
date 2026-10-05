@@ -286,15 +286,6 @@ jobs:
               value=normalize(value,billingRepos,targetBilling);
               write(p,value);
             }
-          } else if(key==='billing'){
-            const p='scripts/release-manifest.mjs';
-            if(!fs.existsSync(path.join(root,p))){
-              if(strict)throw new Error('Missing target-specific Billing identity file: '+p);
-            }else{
-              let value=read(p);
-              value=normalize(value,billingRepos,targetBilling);
-              write(p,value);
-            }
           } else if(key==='control'){
             const p='src/lib/github-profile.ts';
             if(!fs.existsSync(path.join(root,p))){
@@ -305,6 +296,35 @@ jobs:
               value=value.replace(/const LOCAL_PROFILE:GithubProfile=(?:PRIMARY|FALLBACK);/,"const LOCAL_PROFILE:GithubProfile="+localProfileSymbol+";");
               write(p,value);
             }
+          }
+
+          const mustContain=(p,needle,label)=>{
+            if(!fs.existsSync(path.join(root,p)))throw new Error('Identity verification missing '+label+' file: '+p);
+            const value=read(p);
+            if(!value.includes(needle))throw new Error('Identity verification failed for '+label+': expected '+needle+' in '+p);
+          };
+          const mustNotContain=(p,needle,label)=>{
+            if(!fs.existsSync(path.join(root,p)))throw new Error('Identity verification missing '+label+' file: '+p);
+            if(read(p).includes(needle))throw new Error('Identity verification failed for '+label+': unexpected '+needle+' in '+p);
+          };
+
+          if(key==='license'){
+            mustContain('app/layout.tsx',"const LOCAL_PROFILE='"+targetProfile+"' as const",'License Manager local profile');
+            mustContain('database/migrations/20261004100000_license_manager_github_profile.sql',"default '"+targetProfile+"'",'License Manager first-run profile');
+            mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngine,'License Manager Engine repository');
+            mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngineRepoId,'License Manager Engine repository id');
+          }else if(key==='billing'){
+            mustContain('scripts/release-manifest.mjs',targetBilling,'Billing manifest repository');
+          }else if(key==='control'){
+            const localProfileSymbol=targetProfile==='primary'?'PRIMARY':'FALLBACK';
+            mustContain('src/lib/github-profile.ts','const LOCAL_PROFILE:GithubProfile='+localProfileSymbol+';','Control Centre local profile');
+            mustContain('src/lib/github-profile.ts',targetEngine,'Control Centre Engine repository');
+            mustContain('src/lib/github-profile.ts','UPDATE_RELEASE','Control Centre Engine release ref');
+            mustNotContain('src/lib/github-profile.ts','UPDATE_RELEASES','Control Centre legacy Engine release ref');
+          }else if(key==='engine'){
+            mustContain('release/update-baseline.json',targetEngine,'Engine baseline repository');
+            mustContain('release/update-baseline.json','UPDATE_RELEASE','Engine release ref');
+            mustNotContain('release/update-baseline.json','UPDATE_RELEASES','Engine legacy release ref');
           }
           NODE
           }
