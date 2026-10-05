@@ -222,7 +222,7 @@ jobs:
           const normalize=(value,list,target)=>list.reduce((out,item)=>out.split(item).join(target),value).split('UPDATE_RELEASES').join('UPDATE_RELEASE');
 
           if(key==='base'){
-            for(const p of ['src/lib/server/database-package-registry.ts','src/lib/server/engine-branch-client.ts','tools/build-database-package.mjs']){
+            for(const p of ['src/lib/server/database-package-registry.ts','src/lib/server/engine-branch-client.ts','src/lib/server/vercel-engine-provision.ts','src/lib/server/update-checkpoints.ts','tools/build-database-package.mjs']){
               if(!fs.existsSync(path.join(root,p))){if(strict)throw new Error('Missing target-specific Base identity file: '+p);continue;}
               let value=read(p);
               value=normalize(value,baseRepos,targetBase);
@@ -308,7 +308,11 @@ jobs:
             if(read(p).includes(needle))throw new Error('Identity verification failed for '+label+': unexpected '+needle+' in '+p);
           };
 
-          if(key==='license'){
+          if(key==='base'){
+            mustContain('src/lib/server/engine-branch-client.ts',targetEngine,'Base Engine branch client identity');
+            mustContain('src/lib/server/vercel-engine-provision.ts','github:'+targetEngine+'@','Base Engine branch identity');
+            mustContain('src/lib/server/update-checkpoints.ts','github:'+targetEngine+'@','Base Engine checkpoint identity');
+          }else if(key==='license'){
             mustContain('app/layout.tsx',"const LOCAL_PROFILE='"+targetProfile+"' as const",'License Manager local profile');
             mustContain('database/migrations/20261004100000_license_manager_github_profile.sql',"default '"+targetProfile+"'",'License Manager first-run profile');
             mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngine,'License Manager Engine repository');
