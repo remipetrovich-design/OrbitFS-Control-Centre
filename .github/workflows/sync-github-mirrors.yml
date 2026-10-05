@@ -272,6 +272,14 @@ jobs:
               }
               write(p,value);
             }
+          } else if(key==='billing'){
+            const files=['scripts/release-manifest.mjs'];
+            for(const p of files){
+              if(!fs.existsSync(path.join(root,p))){if(strict)throw new Error('Missing target-specific Billing identity file: '+p);continue;}
+              let value=read(p);
+              value=normalize(value,billingRepos,targetBilling);
+              write(p,value);
+            }
           } else if(key==='control'){
             const p='src/lib/github-profile.ts';
             if(!fs.existsSync(path.join(root,p))){
