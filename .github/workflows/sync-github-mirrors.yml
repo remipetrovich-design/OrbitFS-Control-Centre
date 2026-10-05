@@ -314,10 +314,8 @@ jobs:
             done < <(git -C "$dst" diff --name-only "$last_sync"..HEAD)
 
             if [ -s "$drift_file" ]; then
-              echo "::error::$key target contains changes made after its last inbound mirror sync that are not present in the selected source."
-              echo "::error::Sync in the opposite direction first or reconcile these files manually; this workflow will not overwrite them."
+              echo "::warning::$key target has post-marker changes that are not present in the selected source; selected source direction is authoritative and these target changes will be replaced."
               sort -u "$drift_file"
-              exit 1
             fi
           }
 
@@ -332,6 +330,8 @@ jobs:
             # repository-specific names stay correct on each GitHub profile.
             normalize_for_target "$src" "$key" true
             normalize_for_target "$dst" "$key" false
+            # Report target-side drift, but do not block: the explicitly selected
+            # source direction is authoritative for this mirror run.
             assert_no_target_only_drift "$src" "$dst" "$key"
 
             excludes=(--exclude=".git/" --exclude=".github/workflows/")
