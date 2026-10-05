@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Type SYNC to mirror the five OrbitFS repository branches in this direction
+        description: Type SYNC to mirror all five main branches in this direction
         required: true
         default: ""
         type: string
@@ -83,7 +83,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
-          ref: base-release
+          ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           path: source-base
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
-          ref: base-release
+          ref: main
           token: ${{ env.TARGET_TOKEN }}
           path: target-base
 
@@ -99,7 +99,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
-          ref: UPDATE_RELEASE
+          ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           path: source-engine
@@ -107,7 +107,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
-          ref: UPDATE_RELEASE
+          ref: main
           token: ${{ env.TARGET_TOKEN }}
           path: target-engine
 
@@ -337,11 +337,7 @@ jobs:
             else
               echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
               git -C "$dst" commit --quiet -m "Sync from OrbitFS mirror source"
-              case "$key" in
-                base) target_ref="base-release" ;;
-                engine) target_ref="UPDATE_RELEASE" ;;
-                *) target_ref="main" ;;
-              esac
+              target_ref="main"
               git -C "$dst" push --dry-run origin "HEAD:$target_ref"
               echo "$key prepared and push permission verified"
             fi
@@ -367,11 +363,7 @@ jobs:
           for key in base engine license billing control; do
             src="source-$key"
             dst="target-$key"
-            case "$key" in
-              base) target_ref="base-release" ;;
-              engine) target_ref="UPDATE_RELEASE" ;;
-              *) target_ref="main" ;;
-            esac
+            target_ref="main"
             state="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")"
             if [ "$state" = "changed" ]; then
               expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
@@ -390,4 +382,4 @@ jobs:
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five target repository branches match the selected source within mirror scope. Base uses base-release, Engine uses UPDATE_RELEASE, and License/Billing/Control use main. Target-specific GitHub workflows are preserved; Control Centre also preserves its target .env.example." >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved; Control Centre also preserves its target .env.example." >> "$GITHUB_STEP_SUMMARY"
