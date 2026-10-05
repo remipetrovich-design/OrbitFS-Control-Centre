@@ -336,7 +336,7 @@ jobs:
               echo "$key already current"
             else
               echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
-              git -C "$dst" commit --quiet -m "Sync from OrbitFS mirror source"
+              git -C "$dst" commit --quiet -m "Sync main from mirror source"
               target_ref="main"
               git -C "$dst" push --dry-run origin "HEAD:$target_ref"
               echo "$key prepared and push permission verified"
