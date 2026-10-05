@@ -954,9 +954,14 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
   })
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  const latestRun=[...allRuns].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ let sourceEquivalent=Boolean(releaseSha&&releaseSha===sourceSha);
+ if(!sourceEquivalent&&releaseSha&&sourceSha){
+  const comparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(sourceSha)}`).catch(()=>null);
+  sourceEquivalent=Boolean(comparison&&Number(comparison.ahead_by||0)===0);
+ }
  return {
   ok:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,
-  upToDate:Boolean(releaseSha&&releaseSha===sourceSha),
+  upToDate:sourceEquivalent,
   active:Boolean(activeRun),
   activeRun:activeRun?{id:activeRun.id||null,url:activeRun.html_url||null,status:activeRun.status||"in_progress",headSha:activeRun.head_sha||null}:null,
   latestRun:latestRun?{id:latestRun.id||null,url:latestRun.html_url||null,status:latestRun.status||null,conclusion:latestRun.conclusion||null,headSha:latestRun.head_sha||null,updatedAt:latestRun.updated_at||latestRun.created_at||null}:null
@@ -988,6 +993,10 @@ export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async
   releaseSha=String(ref?.object?.sha||"")||null;
   const expected=sourceSha||String(run?.head_sha||"").trim();
   branchMatches=Boolean(expected&&releaseSha===expected);
+  if(!branchMatches&&expected&&releaseSha){
+   const comparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(expected)}`).catch(()=>null);
+   branchMatches=Boolean(comparison&&Number(comparison.ahead_by||0)===0);
+  }
  }
  return {ok:true,repo,releaseRef,runId:run?.id||null,runUrl:run?.html_url||null,status:status||"unknown",conclusion:conclusion||null,completed,releaseSha,branchMatches,sourceSha:sourceSha||String(run?.head_sha||"")||null};
 });
@@ -1208,7 +1217,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   previous_source_commit:previousSourceCommit,
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
- if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_updater_protocol:data.protocol||"2"});
+ if(data.type==="engine")Object.assign(inputs,{source_sha:head,base:String(selectedComponents.includes("base")),apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_updater_protocol:data.protocol||"2"});
  const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
