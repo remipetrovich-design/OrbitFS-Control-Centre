@@ -286,39 +286,6 @@ jobs:
           NODE
           }
 
-          assert_no_target_only_drift() {
-            local src="$1"
-            local dst="$2"
-            local key="$3"
-            local drift_file="$RUNNER_TEMP/orbitfs-sync/$key.target-drift"
-            local last_sync
-            : > "$drift_file"
-            last_sync="$(git -C "$dst" log --format='%H' --grep='^Sync main from ' -n 1 || true)"
-
-            if [ -z "$last_sync" ]; then
-              echo "::notice::$key has no prior inbound mirror marker; treating this run as the bootstrap baseline."
-              return
-            fi
-
-            while IFS= read -r changed_path; do
-              [ -n "$changed_path" ] || continue
-              case "$changed_path" in
-                .github/workflows/*) continue ;;
-              esac
-
-              if [ -e "$src/$changed_path" ] && [ -e "$dst/$changed_path" ]; then
-                cmp -s "$src/$changed_path" "$dst/$changed_path" || printf '%s\n' "$changed_path" >> "$drift_file"
-              elif [ -e "$src/$changed_path" ] || [ -e "$dst/$changed_path" ]; then
-                printf '%s\n' "$changed_path" >> "$drift_file"
-              fi
-            done < <(git -C "$dst" diff --name-only "$last_sync"..HEAD)
-
-            if [ -s "$drift_file" ]; then
-              echo "::warning::$key target has post-marker changes that are not present in the selected source; selected source direction is authoritative and these target changes will be replaced."
-              sort -u "$drift_file"
-            fi
-          }
-
           for key in base engine license billing control; do
             src="source-$key"
             dst="target-$key"
