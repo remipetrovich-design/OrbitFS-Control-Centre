@@ -280,6 +280,15 @@ jobs:
               value=normalize(value,billingRepos,targetBilling);
               write(p,value);
             }
+          } else if(key==='billing'){
+            const p='scripts/release-manifest.mjs';
+            if(!fs.existsSync(path.join(root,p))){
+              if(strict)throw new Error('Missing target-specific Billing identity file: '+p);
+            }else{
+              let value=read(p);
+              value=normalize(value,billingRepos,targetBilling);
+              write(p,value);
+            }
           } else if(key==='control'){
             const p='src/lib/github-profile.ts';
             if(!fs.existsSync(path.join(root,p))){
