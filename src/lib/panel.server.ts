@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
+import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
 
 async function githubContext(){
  const profile=await activeGithubProfile();
@@ -1674,8 +1675,7 @@ async function operationsRunDetail(cfg:any){
  const quickDeployRun=quickDeployRuns[0]||null;
  const successfulDeployments=[...deployRuns,...quickDeployRuns].filter((run:any)=>run?.status==="completed"&&run?.conclusion==="success").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
  const deployedRun=successfulDeployments[0]||null;
- const candidates=[ciRun,deployRun,quickDeployRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
- const run=candidates.find((x:any)=>x.status!=="completed")||candidates[0]||null;
+ const run=selectOperationsRun({ciRun,deployRun,quickDeployRun}) as any;
  const currentSha=String(ref?.object?.sha||"");
  const deployedSha=String(deployedRun?.head_sha||"");
  const productionCurrent=!!currentSha&&!!deployedSha&&currentSha===deployedSha;
