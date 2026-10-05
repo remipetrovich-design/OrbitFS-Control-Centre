@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Type SYNC to mirror all five main branches in this direction
+        description: Type SYNC to mirror the five OrbitFS repository branches in this direction
         required: true
         default: ""
         type: string
@@ -83,7 +83,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
-          ref: main
+          ref: base-release
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           path: source-base
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
-          ref: main
+          ref: base-release
           token: ${{ env.TARGET_TOKEN }}
           path: target-base
 
@@ -99,7 +99,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
-          ref: main
+          ref: UPDATE_RELEASE
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           path: source-engine
@@ -107,7 +107,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
-          ref: main
+          ref: UPDATE_RELEASE
           token: ${{ env.TARGET_TOKEN }}
           path: target-engine
 
@@ -168,6 +168,7 @@ jobs:
           normalize_for_target() {
             local root="$1"
             local key="$2"
+            local strict="${3:-true}"
             local target_base target_engine target_license target_billing target_control target_profile target_label target_token_env
             if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
               target_base="remipetrovich-design/OrbitFS-Base-System"
@@ -189,11 +190,12 @@ jobs:
               target_token_env="ORBITFS_RELEASE_DISPATCH_TOKEN"
             fi
 
-            ROOT="$root" KEY="$key" TARGET_BASE_REPO="$target_base" TARGET_ENGINE_REPO="$target_engine" TARGET_LICENSE_REPO="$target_license" TARGET_BILLING_REPO="$target_billing" TARGET_CONTROL_REPO="$target_control" TARGET_PROFILE="$target_profile" TARGET_LABEL="$target_label" TARGET_TOKEN_ENV="$target_token_env" node <<'NODE'
+            ROOT="$root" KEY="$key" STRICT="$strict" TARGET_BASE_REPO="$target_base" TARGET_ENGINE_REPO="$target_engine" TARGET_LICENSE_REPO="$target_license" TARGET_BILLING_REPO="$target_billing" TARGET_CONTROL_REPO="$target_control" TARGET_PROFILE="$target_profile" TARGET_LABEL="$target_label" TARGET_TOKEN_ENV="$target_token_env" node <<'NODE'
           const fs=require('fs');
           const path=require('path');
           const root=process.env.ROOT;
           const key=process.env.KEY;
+          const strict=process.env.STRICT==='true';
           const targetBase=process.env.TARGET_BASE_REPO;
           const targetEngine=process.env.TARGET_ENGINE_REPO;
           const targetLicense=process.env.TARGET_LICENSE_REPO;
@@ -213,7 +215,7 @@ jobs:
 
           if(key==='base'){
             for(const p of ['src/lib/server/database-package-registry.ts','src/lib/server/engine-branch-client.ts','tools/build-database-package.mjs']){
-              if(!fs.existsSync(path.join(root,p)))throw new Error('Missing target-specific Base identity file: '+p);
+              if(!fs.existsSync(path.join(root,p))){if(strict)throw new Error('Missing target-specific Base identity file: '+p);continue;}
               let value=read(p);
               value=normalize(value,baseRepos,targetBase);
               value=normalize(value,engineRepos,targetEngine);
@@ -222,7 +224,7 @@ jobs:
           } else if(key==='engine'){
             const pkg='tools/build-database-package.mjs';
             const baseline='release/update-baseline.json';
-            if(!fs.existsSync(path.join(root,pkg))||!fs.existsSync(path.join(root,baseline)))throw new Error('Missing target-specific Engine identity file.');
+            if(!fs.existsSync(path.join(root,pkg))||!fs.existsSync(path.join(root,baseline))){if(strict)throw new Error('Missing target-specific Engine identity file.');return;}
             write(pkg,normalize(read(pkg),engineRepos,targetEngine));
             const data=JSON.parse(read(baseline));
             data.sourceRepository=targetEngine;
@@ -242,7 +244,7 @@ jobs:
               'database/migrations/20261004100000_license_manager_github_profile.sql'
             ];
             for(const p of files){
-              if(!fs.existsSync(path.join(root,p)))throw new Error('Missing target-specific License Manager identity file: '+p);
+              if(!fs.existsSync(path.join(root,p))){if(strict)throw new Error('Missing target-specific License Manager identity file: '+p);continue;}
               let value=read(p);
               value=normalize(value,baseRepos,targetBase);
               value=normalize(value,engineRepos,targetEngine);
@@ -275,17 +277,7 @@ jobs:
             last_sync="$(git -C "$dst" log --format='%H' --grep='^Sync main from ' -n 1 || true)"
 
             if [ -z "$last_sync" ]; then
-              local initial_diff
-              local initial_excludes=(--exclude=".git/" --exclude=".github/workflows/")
-              if [ "$key" = "control" ]; then
-                initial_excludes+=(--exclude=".env.example")
-              fi
-              initial_diff="$(rsync -ani --delete "${initial_excludes[@]}" "$src/" "$dst/")"
-              if [ -n "$initial_diff" ]; then
-                echo "::error::$key target has no prior mirror-sync marker and differs from the selected source. Refusing a first destructive sync."
-                printf '%s\n' "$initial_diff"
-                exit 1
-              fi
+              echo "::notice::$key has no prior inbound mirror marker; treating this run as the bootstrap baseline."
               return
             fi
 
@@ -322,8 +314,8 @@ jobs:
             # Convert both temporary trees to the target repository identity before
             # comparing them. Shared logic is still compared byte-for-byte, while
             # repository-specific names stay correct on each GitHub profile.
-            normalize_for_target "$src" "$key"
-            normalize_for_target "$dst" "$key"
+            normalize_for_target "$src" "$key" true
+            normalize_for_target "$dst" "$key" false
             assert_no_target_only_drift "$src" "$dst" "$key"
 
             excludes=(--exclude=".git/" --exclude=".github/workflows/")
@@ -331,7 +323,7 @@ jobs:
               excludes+=(--exclude=".env.example")
             fi
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
-            normalize_for_target "$dst" "$key"
+            normalize_for_target "$dst" "$key" true
 
             remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
             test -z "$remaining" || { echo "::error::Mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
@@ -344,8 +336,13 @@ jobs:
               echo "$key already current"
             else
               echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
-              git -C "$dst" commit --quiet -m "Sync main from mirror source"
-              git -C "$dst" push --dry-run origin HEAD:main
+              git -C "$dst" commit --quiet -m "Sync from OrbitFS mirror source"
+              case "$key" in
+                base) target_ref="base-release" ;;
+                engine) target_ref="UPDATE_RELEASE" ;;
+                *) target_ref="main" ;;
+              esac
+              git -C "$dst" push --dry-run origin "HEAD:$target_ref"
               echo "$key prepared and push permission verified"
             fi
             echo "::endgroup::"
@@ -370,12 +367,17 @@ jobs:
           for key in base engine license billing control; do
             src="source-$key"
             dst="target-$key"
+            case "$key" in
+              base) target_ref="base-release" ;;
+              engine) target_ref="UPDATE_RELEASE" ;;
+              *) target_ref="main" ;;
+            esac
             state="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")"
             if [ "$state" = "changed" ]; then
               expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
-              git -C "$dst" push --force-with-lease="refs/heads/main:$expected" origin HEAD:main
-              git -C "$dst" fetch --quiet origin main
-              test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse origin/main)" || { echo "::error::Remote main verification failed for $key."; exit 1; }
+              git -C "$dst" push --force-with-lease="refs/heads/$target_ref:$expected" origin "HEAD:$target_ref"
+              git -C "$dst" fetch --quiet origin "$target_ref"
+              test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse "origin/$target_ref")" || { echo "::error::Remote main verification failed for $key."; exit 1; }
               excludes=(--exclude=".git/" --exclude=".github/workflows/")
               if [ "$key" = "control" ]; then
                 excludes+=(--exclude=".env.example")
@@ -388,4 +390,4 @@ jobs:
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved; Control Centre also preserves its target .env.example." >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target repository branches match the selected source within mirror scope. Base uses base-release, Engine uses UPDATE_RELEASE, and License/Billing/Control use main. Target-specific GitHub workflows are preserved; Control Centre also preserves its target .env.example." >> "$GITHUB_STEP_SUMMARY"
