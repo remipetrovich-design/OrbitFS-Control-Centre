@@ -263,6 +263,21 @@ jobs:
               }
               write(p,value);
             }
+          } else if(key==='control'){
+            const p='src/lib/github-profile.ts';
+            if(!fs.existsSync(path.join(root,p))){
+              if(strict)throw new Error('Missing target-specific Control Centre identity file: '+p);
+            }else{
+              let value=read(p);
+              value=normalize(value,baseRepos,targetBase);
+              value=normalize(value,engineRepos,targetEngine);
+              value=normalize(value,licenseRepos,targetLicense);
+              value=normalize(value,billingRepos,targetBilling);
+              value=normalize(value,controlRepos,targetControl);
+              const localProfileSymbol=targetProfile==='primary'?'PRIMARY':'FALLBACK';
+              value=value.replace(/const LOCAL_PROFILE:GithubProfile=(?:PRIMARY|FALLBACK);/,"const LOCAL_PROFILE:GithubProfile="+localProfileSymbol+";");
+              write(p,value);
+            }
           }
           NODE
           }
