@@ -123,7 +123,7 @@ export async function releaseBranchState(target:ReleaseTarget){
  const latestPrepare=cleanRun((runs?.workflow_runs||[])[0]||null);
  return {
   target,label:cfg.label,repo:cfg.repo,sourceBranch:cfg.branch,releaseBranch:cfg.releaseRef,
-  currentSha,preparedSha,preparedCurrent:Boolean(currentSha&&preparedSha===currentSha),
+  currentSha,preparedSha,preparedCurrent:Boolean(currentSha&&preparedSha&&(preparedSha===currentSha||(compare&&Number(compare.ahead_by||0)===0))),
   commitsAhead:Number(compare?.ahead_by||0),commitsBehind:Number(compare?.behind_by||0),
   changedFiles:Array.isArray(compare?.files)?compare.files.map((f:any)=>({path:f.filename,status:f.status,additions:f.additions,deletions:f.deletions,changes:f.changes})):[],
   changedFileCount:Array.isArray(compare?.files)?compare.files.length:0,
