@@ -626,7 +626,7 @@ function buildChangelog(type: ReleaseType, data: any) {
   const changes = initialRelease
     ? `No previously published Base release exists in this channel. This initial Base deployment will package the complete current source snapshot (${files.length} tracked files).`
     : initialUpdate
-      ? `No previously published Update exists in this channel. v${String(data.baseline?.initialReleaseVersion||data.version||"1.0.0")} is the locked Engine snapshot baseline at ${String(data.baseline?.sourceSha||data.head||"").slice(0,12)||"the inspected UPDATE_RELEASE SHA"}. It packages the current Engine state once; future releases compare against this published source SHA and contain only the newly detected change set.`
+      ? `No previously published Update exists in this channel. v${String(data.baseline?.initialReleaseVersion||data.version||"1.0.0")} is the locked Engine snapshot baseline at ${String(data.baseline?.sourceSha||data.head||"").slice(0,12)||"the inspected UPDATE_RELEASE SHA"}. It establishes the initial Update source baseline. BASE may also be selected as an Update target so the updater can patch an existing Base installation; future releases compare against this published source SHA and contain only the newly detected change set.`
     : files.length
     ? `This ${base ? "deployment" : "update"} contains ${files.length} changed source file${files.length === 1 ? "" : "s"}.${base ? "" : ` The selected components are ${(data.components || []).map((x:string)=>x.toUpperCase()).join(", ") || "not specified"}.`}`
     : `No source file changes were detected against the previous published ${base ? "Base" : "Update"} release. There is nothing new to release, so dispatch is blocked until source files change.`;
