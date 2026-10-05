@@ -1166,7 +1166,6 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
  const missingDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
  if(missingDetectedComponents.length)throw new Error(`Stage 1 targets do not cover detected Update changes: ${missingDetectedComponents.join(", ")}. Re-inspect the Update source before building.`);
- if(initialUpdate&&selectedComponents.includes("base"))throw new Error("The v1.0.0 bootstrap is an Engine snapshot baseline only. Base is released separately and must not be selected for the bootstrap Update.");
 
  const compactDispatchFile=(file:any)=>({
   filename:String(file?.filename||""),
