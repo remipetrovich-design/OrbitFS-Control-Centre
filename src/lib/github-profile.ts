@@ -69,8 +69,19 @@ export async function activeGithubProfileName():Promise<GithubProfileName>{
  return storedProfileName();
 }
 export function localGithubProfileName():GithubProfileName{return LOCAL_PROFILE.name;}
-export async function activeGithubProfile():Promise<GithubProfile>{return LOCAL_PROFILE;}
+export async function requireLocalGithubProfileActive():Promise<GithubProfileName>{
+ const active=await storedProfileName();
+ if(active!==LOCAL_PROFILE.name){
+  throw new Error("This "+LOCAL_PROFILE.name+" Control Centre is inactive. Active GitHub profile is "+active+". Switch source mode before running GitHub operations from this deployment.");
+ }
+ return active;
+}
+export async function activeGithubProfile():Promise<GithubProfile>{
+ await requireLocalGithubProfileActive();
+ return LOCAL_PROFILE;
+}
 export async function githubToken(){
+ await requireLocalGithubProfileActive();
  const value=String(process.env[LOCAL_PROFILE.tokenEnv]||"").trim();
  if(!value)throw new Error("Missing server environment variable: "+LOCAL_PROFILE.tokenEnv+" for local "+LOCAL_PROFILE.name+" GitHub system");
  return value;
