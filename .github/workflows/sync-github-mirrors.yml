@@ -277,12 +277,7 @@ jobs:
             if(!fs.existsSync(path.join(root,p))){
               if(strict)throw new Error('Missing target-specific Control Centre identity file: '+p);
             }else{
-              let value=read(p);
-              value=normalize(value,baseRepos,targetBase);
-              value=normalize(value,engineRepos,targetEngine);
-              value=normalize(value,licenseRepos,targetLicense);
-              value=normalize(value,billingRepos,targetBilling);
-              value=normalize(value,controlRepos,targetControl);
+              let value=read(p).split('UPDATE_RELEASES').join('UPDATE_RELEASE');
               const localProfileSymbol=targetProfile==='primary'?'PRIMARY':'FALLBACK';
               value=value.replace(/const LOCAL_PROFILE:GithubProfile=(?:PRIMARY|FALLBACK);/,"const LOCAL_PROFILE:GithubProfile="+localProfileSymbol+";");
               write(p,value);
@@ -310,9 +305,6 @@ jobs:
               case "$changed_path" in
                 .github/workflows/*) continue ;;
               esac
-              if [ "$key" = "control" ] && [ "$changed_path" = ".env.example" ]; then
-                continue
-              fi
 
               if [ -e "$src/$changed_path" ] && [ -e "$dst/$changed_path" ]; then
                 cmp -s "$src/$changed_path" "$dst/$changed_path" || printf '%s\n' "$changed_path" >> "$drift_file"
@@ -343,9 +335,6 @@ jobs:
             assert_no_target_only_drift "$src" "$dst" "$key"
 
             excludes=(--exclude=".git/" --exclude=".github/workflows/")
-            if [ "$key" = "control" ]; then
-              excludes+=(--exclude=".env.example")
-            fi
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
             normalize_for_target "$dst" "$key" true
 
@@ -417,9 +406,6 @@ jobs:
               test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse "origin/$target_ref")" || { echo "::error::Remote main verification failed for $key."; exit 1; }
               test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for $key."; exit 1; }
               excludes=(--exclude=".git/" --exclude=".github/workflows/")
-              if [ "$key" = "control" ]; then
-                excludes+=(--exclude=".env.example")
-              fi
               remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
               test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
               echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
@@ -430,4 +416,4 @@ jobs:
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved; Control Centre also preserves its target .env.example." >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved." >> "$GITHUB_STEP_SUMMARY"
