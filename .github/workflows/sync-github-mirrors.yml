@@ -174,10 +174,11 @@ jobs:
             local root="$1"
             local key="$2"
             local strict="${3:-true}"
-            local target_base target_engine target_license target_billing target_control target_profile target_label target_token_env
+            local target_base target_engine target_engine_id target_license target_billing target_control target_profile target_label target_token_env
             if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
               target_base="remipetrovich-design/OrbitFS-Base-System"
               target_engine="remipetrovich-design/OrbitFS_Engine"
+              target_engine_id="1393749443"
               target_license="remipetrovich-design/OrbitFS-License-Administration"
               target_billing="remipetrovich-design/OrbitFS-Billing-Shopfront"
               target_control="remipetrovich-design/OrbitFS-Control-Centre"
@@ -187,6 +188,7 @@ jobs:
             else
               target_base="lucaskerim123/V1-vercel-base"
               target_engine="lucaskerim123/V1-vercel-engine"
+              target_engine_id="1358790703"
               target_license="lucaskerim123/Custom-licence-manager"
               target_billing="lucaskerim123/V2_Billing_Store"
               target_control="lucaskerim123/Dev-panel"
@@ -195,7 +197,7 @@ jobs:
               target_token_env="ORBITFS_RELEASE_DISPATCH_TOKEN"
             fi
 
-            ROOT="$root" KEY="$key" STRICT="$strict" TARGET_BASE_REPO="$target_base" TARGET_ENGINE_REPO="$target_engine" TARGET_LICENSE_REPO="$target_license" TARGET_BILLING_REPO="$target_billing" TARGET_CONTROL_REPO="$target_control" TARGET_PROFILE="$target_profile" TARGET_LABEL="$target_label" TARGET_TOKEN_ENV="$target_token_env" node <<'NODE'
+            ROOT="$root" KEY="$key" STRICT="$strict" TARGET_BASE_REPO="$target_base" TARGET_ENGINE_REPO="$target_engine" TARGET_ENGINE_REPO_ID="$target_engine_id" TARGET_LICENSE_REPO="$target_license" TARGET_BILLING_REPO="$target_billing" TARGET_CONTROL_REPO="$target_control" TARGET_PROFILE="$target_profile" TARGET_LABEL="$target_label" TARGET_TOKEN_ENV="$target_token_env" node <<'NODE'
           const fs=require('fs');
           const path=require('path');
           const root=process.env.ROOT;
@@ -203,6 +205,7 @@ jobs:
           const strict=process.env.STRICT==='true';
           const targetBase=process.env.TARGET_BASE_REPO;
           const targetEngine=process.env.TARGET_ENGINE_REPO;
+          const targetEngineRepoId=process.env.TARGET_ENGINE_REPO_ID;
           const targetLicense=process.env.TARGET_LICENSE_REPO;
           const targetBilling=process.env.TARGET_BILLING_REPO;
           const targetControl=process.env.TARGET_CONTROL_REPO;
@@ -262,6 +265,9 @@ jobs:
               value=normalize(value,controlRepos,targetControl);
               if(p==='lib/core/releases.ts'||p==='app/api/v1/engine-bootstrap/route.ts'){
                 value=value.replace(/ORBITFS_(?:FALLBACK_GITHUB_TOKEN|RELEASE_DISPATCH_TOKEN)/g,targetTokenEnv);
+              }
+              if(p==='app/api/v1/engine-bootstrap/route.ts'){
+                value=value.replace(/String\(repository\.id\) !== '\d+'/,"String(repository.id) !== '"+targetEngineRepoId+"'");
               }
               if(p==='app/layout.tsx'){
                 value=value.replace(/const LOCAL_PROFILE='(?:primary|fallback)' as const;/,"const LOCAL_PROFILE='"+targetProfile+"' as const;");
