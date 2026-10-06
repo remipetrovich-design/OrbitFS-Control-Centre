@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import {clearReleaseStateCore,inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
 import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
 import {activeGithubProfile,activeGithubProfileName,githubToken,githubProfiles} from "@/lib/github-profile";
+import {compareOrbitReleaseVersions,isOrbitReleaseVersion,nextOrbitReleaseVersion} from "@/lib/release-version";
 
 type ReleaseTarget="base"|"engine";
 type ServiceTarget="license_manager"|"billing_store";
@@ -121,9 +122,10 @@ export async function releaseBranchState(target:ReleaseTarget){
  let compare:any=null;
  if(preparedSha&&currentSha&&preparedSha!==currentSha)compare=await github("/repos/"+cfg.repo+"/compare/"+preparedSha+"..."+currentSha).catch(()=>null);
  const latestPrepare=cleanRun((runs?.workflow_runs||[])[0]||null);
+ const preparedCurrent=Boolean(currentSha&&preparedSha&&(preparedSha===currentSha||(compare&&Number(compare.ahead_by||0)===0)));
  return {
   target,label:cfg.label,repo:cfg.repo,sourceBranch:cfg.branch,releaseBranch:cfg.releaseRef,
-  currentSha,preparedSha,preparedCurrent:Boolean(currentSha&&preparedSha&&(preparedSha===currentSha||(compare&&Number(compare.ahead_by||0)===0))),
+  currentSha,preparedSha,preparedCurrent,
   commitsAhead:Number(compare?.ahead_by||0),commitsBehind:Number(compare?.behind_by||0),
   changedFiles:Array.isArray(compare?.files)?compare.files.map((f:any)=>({path:f.filename,status:f.status,additions:f.additions,deletions:f.deletions,changes:f.changes})):[],
   changedFileCount:Array.isArray(compare?.files)?compare.files.length:0,
@@ -378,10 +380,7 @@ export async function licenseChange(input:{identity:string;action:string;license
 }
 
 
-function nextPatchVersion(value:any){
- const match=String(value||"").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
- return match?match[1]+"."+match[2]+"."+(Number(match[3])+1):"1.0.0";
-}
+function nextPatchVersion(value:any){return nextOrbitReleaseVersion(value)}
 function migrationPathInfo(target:ReleaseTarget,pathValue:any){
  const path=String(pathValue||"").replaceAll("\\","/");
  if(target==="base"){
@@ -490,8 +489,8 @@ export async function releaseBuildCommand(input:{action:string;target:ReleaseTar
   if(branch.preparedCurrent)inspection=await inspectSourceCore({type,channel});
   const currentVersion=inspection?.baseline?.version||published?.version||null;
   const suggestedVersion=inspection?.initialUpdate
-   ?String(inspection?.baseline?.initialReleaseVersion||"1.0.0")
-   :inspection?.initialRelease?"1.0.0":nextPatchVersion(currentVersion);
+   ?String(inspection?.baseline?.initialReleaseVersion||"1.0")
+   :inspection?.initialRelease?"1.0":nextPatchVersion(currentVersion);
   const migrations=branch.preparedCurrent&&inspection?await releaseDatabaseInspection(target,inspection):null;
   return {ok:true,target,channel,preparedCurrent:branch.preparedCurrent,commitsAhead:branch.commitsAhead,currentVersion,suggestedVersion,sourceSha:inspection?.head||branch.preparedSha||null,components:inspection?.detectedComponents||[],minimumBaseVersion:target==="engine"?(inspection?.baseBaseline?.version||latestBase?.version||null):null,database:migrations,message:branch.preparedCurrent?(target==="base"?"Base":"Update")+" release source is ready. Suggested version v"+suggestedVersion+".":"Prepare "+(target==="base"?"Base":"Engine")+" source first; "+branch.commitsAhead+" commit"+(branch.commitsAhead===1?" is":"s are")+" still ahead."};
  }
@@ -499,13 +498,14 @@ export async function releaseBuildCommand(input:{action:string;target:ReleaseTar
  const inspection=await inspectSourceCore({type,channel});
  const currentVersion=inspection?.baseline?.version||null;
  const suggestedVersion=inspection?.initialUpdate
-  ?String(inspection?.baseline?.initialReleaseVersion||"1.0.0")
-  :inspection?.initialRelease?"1.0.0":nextPatchVersion(currentVersion);
+  ?String(inspection?.baseline?.initialReleaseVersion||"1.0")
+  :inspection?.initialRelease?"1.0":nextPatchVersion(currentVersion);
  const version=String(input.version||suggestedVersion).trim();
+  if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
  const database=await releaseDatabaseInspection(target,inspection);
  const components=target==="engine"?(Array.isArray(inspection?.detectedComponents)?inspection.detectedComponents:[]):["base"];
  const minimumBaseVersion=target==="engine"?String(input.minimum_base_version||inspection?.baseBaseline?.version||"").trim():"";
- const protocol=target==="engine"?String(input.protocol||"1").trim():"";
+ const protocol=target==="engine"?String(input.protocol||"2").trim():"";
  if(action==="inspect")return {ok:true,target,channel,currentVersion,suggestedVersion,selectedVersion:version,sourceSha:inspection.head,hasSourceChanges:inspection.hasSourceChanges===true,changeSummary:inspection.changeSummary||{},components,minimumBaseVersion:minimumBaseVersion||null,protocol:protocol||null,database,message:(target==="base"?"Base":"Update")+" inspected at "+String(inspection.head||"").slice(0,8)+". Next version v"+version+"."};
  if(action==="database")return {ok:database.ok,target,version,sourceSha:inspection.head,database,message:database.message};
  if(action!=="build")throw new Error("Unsupported release build action");
@@ -581,8 +581,7 @@ export async function releaseCommand(input:{action:string;release_id?:string;oth
  return licenseManagerRequest("/releases/"+encodeURIComponent(id),{method:"POST",body:JSON.stringify({action:mapped,target_channel:input.target_channel,reason:input.reason})});
 }
 
-function semverParts(value:any){return String(value||"").replace(/^v/i,"").split(/[.+-]/).slice(0,3).map(x=>Number(x)||0)}
-function compareVersions(a:any,b:any){const aa=semverParts(a),bb=semverParts(b);for(let i=0;i<3;i++){if(aa[i]>bb[i])return 1;if(aa[i]<bb[i])return -1}return 0}
+function compareVersions(a:any,b:any){return compareOrbitReleaseVersions(a,b)??0}
 async function chooseInstallation(snapshot:any,installationId?:string){
  const all=snapshot?.billing?.installations||[];
  if(installationId){const found=all.find((x:any)=>String(x.id)===installationId||String(x.installation_id)===installationId);if(found)return found;throw new Error("Installation not found for this customer");}

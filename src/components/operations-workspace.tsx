@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,ChevronRight,ExternalLink,FileCode2,Github,Loader2,Play,RefreshCw,Server,ShieldCheck,Terminal,XCircle,Zap} from "lucide-react";
-import {getOperationsState,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
+import {getOperationsState,getOperationsRunDetail,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
 
 const SYSTEMS=[
  {key:"licenseManager",label:"Custom License Manager"},
@@ -21,52 +21,100 @@ export function OperationsWorkspace({session}:{session:any}){
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
  const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
- const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:true,billingStore:true});
+ const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:false,billingStore:false});
+ const [consoleBusy,setConsoleBusy]=useState<Record<string,boolean>>({});
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
  const [syncState,setSyncState]=useState<any>(null);
 
- const load=useCallback(async(silent=false)=>{
+ const applyState=useCallback((r:any)=>{
+  setData((current:any)=>{
+   const systems={...(r.systems||{})};
+   for(const key of Object.keys(systems)){
+    const previous=current?.systems?.[key];
+    const incoming=systems[key];
+    const sameRun=String(previous?.run?.id||"")===String(incoming?.run?.id||"");
+    const sameRunState=String(previous?.run?.status||"")===String(incoming?.run?.status||"")&&String(previous?.run?.conclusion||"")===String(incoming?.run?.conclusion||"");
+    if(previous?.detailsLoaded&&sameRun&&sameRunState){
+     systems[key]={...incoming,jobs:previous.jobs||[],failure:previous.failure||null,chatPrompt:previous.chatPrompt||null,detailsLoaded:true};
+    }
+   }
+   return {...r,systems};
+  });
+  setScans(previous=>{
+   const next:Record<string,any>={};
+   for(const [key,scan] of Object.entries(previous)){
+    const system=r.systems?.[key];
+    if((scan as any)?.currentSha===system?.currentSha&&((scan as any)?.baselineSha||null)===(system?.deployedSha||null))next[key]=scan;
+   }
+   return next;
+  });
+ },[]);
+
+ const load=useCallback(async(silent=false,force=false)=>{
   if(!silent)setLoading(true);
-  try{const r=await getOperationsState({data:{token:session.token}});setData(r);setError("")}
+  try{const r=await getOperationsState({data:{token:session.token,force}});applyState(r);setError("")}
   catch(x:any){setError(x.message||"Unable to load Operations state.")}
   finally{if(!silent)setLoading(false)}
- },[session.token]);
+ },[session.token,applyState]);
 
  const loadSync=useCallback(async()=>{
   try{const r=await getRepositorySyncState({data:{token:session.token}});setSyncState(r)}
   catch(x:any){setError(x.message||"Unable to load repository sync state.")}
  },[session.token]);
 
- const refreshAll=async()=>{
-  setLoading(true);setError("");void loadSync();
+ const refreshRepositoryChecks=useCallback(async(force=false)=>{
+  const rows=await Promise.all(SYSTEMS.map(async system=>[system.key,await getOperationsScan({data:{token:session.token,system:system.key,force}})] as const));
+  setScans(current=>({...current,...Object.fromEntries(rows)}));
+ },[session.token]);
+
+ const loadConsole=useCallback(async(system:string,silent=false)=>{
+  if(!silent)setConsoleBusy(v=>({...v,[system]:true}));
   try{
-   const [state,...scanResults]=await Promise.all([
-    getOperationsState({data:{token:session.token}}),
-    ...SYSTEMS.map(system=>getOperationsScan({data:{token:session.token,system:system.key as any}}))
+   const detail=await getOperationsRunDetail({data:{token:session.token,system:system as any}});
+   setData((current:any)=>({...current,systems:{...(current.systems||{}),[system]:detail}}));
+  }catch(x:any){if(!silent)setError(x.message||"Unable to load workflow details.")}
+  finally{if(!silent)setConsoleBusy(v=>({...v,[system]:false}))}
+ },[session.token]);
+
+ const refreshAll=async()=>{
+  setLoading(true);setError("");
+  try{
+   const openConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]);
+   const [state,sync,consoleRows]=await Promise.all([
+    getOperationsState({data:{token:session.token,force:true}}),
+    getRepositorySyncState({data:{token:session.token}}),
+    Promise.all(openConsoleKeys.map(async key=>[key,await getOperationsRunDetail({data:{token:session.token,system:key as any}})] as const)),
+    refreshRepositoryChecks(true),
    ]);
-   setData(state);
-   setScans(Object.fromEntries(SYSTEMS.map((system,index)=>[system.key,scanResults[index]])));
-  }catch(x:any){setError(x.message||"Unable to refresh Operations state and repository changes.")}
+   applyState(state);
+   setSyncState(sync);
+   if(consoleRows.length)setData((current:any)=>({...current,systems:{...(current.systems||{}),...Object.fromEntries(consoleRows)}}));
+  }catch(x:any){setError(x.message||"Unable to refresh Operations status.")}
   finally{setLoading(false)}
  };
 
  useEffect(()=>{void load()},[load]);
- useEffect(()=>{
-  let alive=true;
-  Promise.all(SYSTEMS.map(async system=>{
-   try{return [system.key,await getOperationsScan({data:{token:session.token,system:system.key as any}})] as const}
-   catch{return [system.key,null] as const}
-  })).then(entries=>{
-   if(!alive)return;
-   setScans(Object.fromEntries(entries.filter(([,value])=>Boolean(value))));
-  });
-  return()=>{alive=false};
- },[session.token]);
  useEffect(()=>{void loadSync()},[loadSync]);
+ useEffect(()=>{
+  void refreshRepositoryChecks(false).catch(()=>undefined);
+  const t=setInterval(()=>{if(document.visibilityState==="visible")void refreshRepositoryChecks(false).catch(()=>undefined)},25*60*1000);
+  return()=>clearInterval(t);
+ },[refreshRepositoryChecks]);
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
- useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),15000);return()=>clearInterval(t)},[syncLive,loadSync]);
+ useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
- useEffect(()=>{const t=setInterval(()=>void load(true),live?15000:60000);return()=>clearInterval(t)},[live,load]);
+ useEffect(()=>{if(!live)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void load(true)},60000);return()=>clearInterval(t)},[live,load]);
+ const liveConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status&&data.systems[key].run.status!=="completed");
+ const liveConsoleSignature=liveConsoleKeys.join("|");
+ useEffect(()=>{
+  if(!liveConsoleSignature)return;
+  const refresh=()=>{if(document.visibilityState==="visible")for(const key of liveConsoleSignature.split("|").filter(Boolean))void loadConsole(key,true)};
+  void refresh();
+  const t=setInterval(refresh,30000);
+  return()=>clearInterval(t);
+ },[liveConsoleSignature,loadConsole]);
+ const failedConsoleKey=SYSTEMS.map(s=>s.key).find(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status==="completed"&&data.systems[key].run.conclusion==="failure"&&!data.systems[key].detailsLoaded)||"";
+ useEffect(()=>{if(failedConsoleKey)void loadConsole(failedConsoleKey)},[failedConsoleKey,loadConsole]);
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
@@ -77,7 +125,8 @@ export function OperationsWorkspace({session}:{session:any}){
    const r=await runOperation({data:{token:session.token,system:system as any,action:actionType}});
    setNotice(r.message||"Workflow queued.");
    setConsoleOpen(v=>({...v,[system]:true}));
-   await load(true);
+   await load(true,true);
+   await loadConsole(system,true);
   }catch(x:any){setError(x.message||"Unable to start workflow.")}
   finally{setBusy("")}
  };
@@ -188,6 +237,7 @@ export function OperationsWorkspace({session}:{session:any}){
          <div className="flex flex-wrap justify-end gap-2">
           {deployRun?.html_url&&<a className="button-secondary" href={deployRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last deploy</a>}
           <button className="button-primary" onClick={()=>action(system.key,"deploy")} disabled={!!busy||!fullCurrent||productionCurrent}>{busy===system.key+"deploy"?<Loader2 size={13} className="animate-spin"/>:<Zap size={13}/>}Deploy</button>
+          {quickRun?.html_url&&<a className="button-secondary" href={quickRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last quick deploy</a>}
           <button className="button-secondary border-red-400/30 text-red-200" onClick={()=>action(system.key,"override-deploy")} disabled={!!busy}>{busy===system.key+"override-deploy"?<Loader2 size={13} className="animate-spin"/>:<AlertTriangle size={13}/>}Quick Deploy</button>
          </div>
         </div>
@@ -198,20 +248,23 @@ export function OperationsWorkspace({session}:{session:any}){
       {!productionCurrent&&!s.latestDeployment&&<div className="border-t border-amber-400/20 bg-amber-400/5 px-4 py-3 text-[10px] text-amber-100"><b>Production baseline unavailable.</b> No successful normal or Quick deployment is recorded for this repository yet. Current main is <code>{s.currentSha?.slice(0,12)||"unknown"}</code>; repository changes below are compared as a full snapshot until a successful production deployment exists.</div>}
 
       <div className="border-t">
-       <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>setConsoleOpen(v=>({...v,[system.key]:!isConsoleOpen}))}>
-        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output":`Workflow status refreshes every ${live?"15":"60"} seconds`}</p></div></div>
-        <div className="flex items-center gap-2"><Pill text={run?.status==="completed"?"CLOSED":run?"LIVE":"IDLE"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
+       <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>{const next=!isConsoleOpen;setConsoleOpen(v=>({...v,[system.key]:next}));if(next&&!s.detailsLoaded)void loadConsole(system.key)}}>
+        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output loads only when opened":run?"Workflow summary refreshes every 60 seconds while active":"No background polling while idle"}</p></div></div>
+        <div className="flex items-center gap-2"><Pill text={!run?"IDLE":isConsoleOpen?(run.status==="completed"?"OPEN":"LIVE"):"CLOSED"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {isConsoleOpen&&<div className="border-t bg-black/20 p-3">
         {!run?<div className="p-6 text-center text-xs text-muted-foreground">No workflow run is available yet.</div>:<>
-         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          {[["Workflow",s.monitoring||run.name],["Run","#"+run.run_number],["Commit",run.head_sha],["Updated",time(run.updated_at)],["State",runStatus(run)]].map(([k,v])=><div key={k} className="rounded-lg border bg-background/40 p-2"><span className="block text-[9px] uppercase tracking-wider text-muted-foreground">{k}</span><code className="mt-1 block truncate text-[10px]">{v}</code></div>)}
+         <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+           {[["Workflow",s.monitoring||run.name],["Run","#"+run.run_number],["Commit",run.head_sha],["Updated",time(run.updated_at)],["State",runStatus(run)]].map(([k,v])=><div key={k} className="rounded-lg border bg-background/40 p-2"><span className="block text-[9px] uppercase tracking-wider text-muted-foreground">{k}</span><code className="mt-1 block truncate text-[10px]">{v}</code></div>)}
+          </div>
+          {run.html_url&&<a className="button-secondary shrink-0" href={run.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Open run</a>}
          </div>
-         <div className="mt-3 space-y-2">{(s.jobs||[]).map((job:any)=><article key={job.id} className="rounded-lg border bg-background/30">
-          <div className="flex items-center justify-between gap-3 border-b px-3 py-2"><div><p className="text-xs font-semibold">{job.name}</p><p className="mt-1 text-[9px] text-muted-foreground">{job.status} · {job.conclusion||"in progress"} · {duration(job.started_at,job.completed_at)}</p></div><Pill text={job.conclusion==="success"?"PASSED":job.conclusion==="failure"?"FAILED":String(job.status||"").toUpperCase()}/></div>
+         {consoleBusy[system.key]&&!s.detailsLoaded?<div className="mt-3 rounded-lg border bg-background/30 p-4 text-xs text-muted-foreground"><Loader2 size={13} className="mr-2 inline animate-spin"/>Loading workflow jobs and console output on request…</div>:<div className="mt-3 space-y-2">{(s.jobs||[]).map((job:any)=><article key={job.id} className="rounded-lg border bg-background/30">
+          <div className="flex items-center justify-between gap-3 border-b px-3 py-2"><div><p className="text-xs font-semibold">{job.name}</p><p className="mt-1 text-[9px] text-muted-foreground">{job.status} · {job.conclusion||"in progress"} · {duration(job.started_at,job.completed_at)}</p></div><div className="flex shrink-0 items-center gap-2">{job.html_url&&<a className="button-secondary" href={job.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Open job</a>}<Pill text={job.conclusion==="success"?"PASSED":job.conclusion==="failure"?"FAILED":String(job.status||"").toUpperCase()}/></div></div>
           <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-3">{(job.steps||[]).map((step:any)=><div key={step.name} className="flex items-start gap-2 bg-card px-3 py-2">{step.conclusion==="success"?<CheckCircle2 size={13} className="mt-0.5 text-emerald-400"/>:step.conclusion==="failure"?<XCircle size={13} className="mt-0.5 text-red-400"/>:<Activity size={13} className="mt-0.5 text-primary"/>}<div className="min-w-0"><p className="truncate text-[10px] font-medium">{step.name}</p><p className="text-[9px] text-muted-foreground">{step.status}{step.conclusion?" · "+step.conclusion:""}</p></div></div>)}</div>
           <details open={job.conclusion==="failure"}><summary className="cursor-pointer border-t px-3 py-2 text-[10px] font-medium text-muted-foreground">{job.conclusion==="failure"?"Failed output":"Console output"} · {job.status==="completed"?"final":"live"}</summary><pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t bg-black/35 p-3 text-[10px] leading-5 text-slate-300">{job.logTail||job.logError||"Waiting for GitHub to expose console output…"}</pre></details>
-         </article>)}</div>
+         </article>)}</div>}
          {s.failure&&<div className="mt-3 rounded-lg border border-red-400/30 bg-red-400/5">
           <div className="flex items-center gap-2 border-b border-red-400/20 px-3 py-2 text-red-200"><AlertTriangle size={14}/><p className="text-xs font-semibold">Failure report</p></div>
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap p-3 text-[10px] leading-5 text-red-100/90">{(s.failure.lines||[]).join("\n")}</pre>
@@ -223,7 +276,7 @@ export function OperationsWorkspace({session}:{session:any}){
 
       <div className="border-t">
        <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>scan?setScanOpen(v=>({...v,[system.key]:!v[system.key]})):loadScan(system.key)} disabled={busy===system.key+"scan"}>
-        <div className="flex items-center gap-2"><FileCode2 size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">REPOSITORY CHANGE SCAN</p><p className="mt-1 text-[9px] text-muted-foreground">Compare current main against the last successful production deployment.</p></div></div>
+        <div className="flex items-center gap-2"><FileCode2 size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">REPOSITORY CHANGE SCAN</p><p className="mt-1 text-[9px] text-muted-foreground">Loaded only when opened. Compare current main against the last successful production deployment.</p></div></div>
         <div className="flex items-center gap-2">{busy===system.key+"scan"?<Loader2 size={14} className="animate-spin"/>:scan&&<Pill text={scan.updateAvailable?`${scan.changedFileCount} FILES`:"CURRENT"}/>} {scanOpen[system.key]?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {scan&&!scanOpen[system.key]&&<div className="border-t px-4 py-2 text-[10px] text-muted-foreground">{scan.updateAvailable?<><b className="text-amber-200">Not latest.</b> {scan.changedFileCount} changed file{scan.changedFileCount===1?"":"s"} since the production baseline.</>:<><b className="text-emerald-200">Latest.</b> Production matches current main.</>}</div>}

@@ -53,12 +53,12 @@ async function storedProfileName():Promise<GithubProfileName>{
   const raw=String(body?.profile||"").trim().toLowerCase();
   if(raw!=="primary"&&raw!=="fallback")throw new Error("License Manager source profile is invalid or missing.");
   const name=raw as GithubProfileName;
-  profileCache={name,expires:Date.now()+5000};
+  profileCache={name,expires:Date.now()+20*60*1000};
   return name;
  }catch(error){
   if(profileCache)return profileCache.name;
   const name=fallbackProfileName();
-  profileCache={name,expires:Date.now()+2000};
+  profileCache={name,expires:Date.now()+20*60*1000};
   return name;
  }
 }

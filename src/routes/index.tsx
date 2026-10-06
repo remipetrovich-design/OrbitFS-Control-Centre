@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ReleaseWorkspace } from "@/components/release-workspace";
 import { OperationsWorkspace } from "@/components/operations-workspace";
 import { McpControlsWorkspace } from "@/components/mcp-controls-workspace";
+import { DatabaseSystemWorkspace } from "@/components/database-system-workspace";
+import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, CheckCircle2, ChevronRight, CircleDot,
@@ -21,7 +23,7 @@ import {
 
 export const Route = createFileRoute("/")({ component: Index });
 
-type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
+type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "database" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
 type ReleaseType = "base" | "engine";
 
 const EMPTY = { releases: [], drafts: [], channels: [] };
@@ -89,11 +91,20 @@ function Index() {
         // overwrite a newly selected release with an older run.
         restoredRunRef.current = true;
         const candidates = [
-          ...(base.drafts || []).map((draft:any) => ({draft, type:"base", repo:base.repositories?.base?.workerRepo || ""})),
-          ...(engine.drafts || []).map((draft:any) => ({draft, type:"engine", repo:engine.repositories?.engine?.repo || ""}))
-        ].filter(({repo}:any)=>Boolean(repo)).flatMap(({draft,type,repo}:any) => (draft.attempts || [])
+          ...(base.drafts || []).map((draft:any) => ({draft,type:"base",activeSourceRepo:base.repositories?.base?.repo || "",activeWorkerRepo:base.repositories?.base?.workerRepo || ""})),
+          ...(engine.drafts || []).map((draft:any) => ({draft,type:"engine",activeSourceRepo:engine.repositories?.engine?.repo || "",activeWorkerRepo:engine.repositories?.engine?.repo || ""}))
+        ].flatMap(({draft,type,activeSourceRepo,activeWorkerRepo}:any) => (draft.attempts || [])
           .filter((attempt:any) => Number(attempt.run_id)>0 && !draft.archived_at)
-          .map((attempt:any) => ({draft,type,repo,attempt})))
+          .map((attempt:any) => ({
+            draft,type,attempt,
+            repo:activeReleaseRunRepository({
+              sourceRepo:draft.source_repo,
+              runUrl:attempt.run_url || draft.last_run_url || "",
+              activeSourceRepo,
+              activeWorkerRepo
+            })
+          })))
+          .filter(({repo}:any)=>Boolean(repo))
           .sort((a:any,b:any) => new Date(b.attempt.created_at || b.draft.updated_at || 0).getTime()-new Date(a.attempt.created_at || a.draft.updated_at || 0).getTime());
         const candidate = candidates.find((x:any) => ["queued","in_progress"].includes(x.attempt.status))
           || candidates.find((x:any) => x.attempt.status==="success" || x.draft.status==="handed_off")
@@ -142,6 +153,7 @@ function Index() {
     if (!run?.id || !runRepo || !session) return;
     const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
     let stopped = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       try {
         const r = await getReleaseRun({ data: { token: session.token, repo: runRepo, runId: run.id } });
@@ -153,6 +165,7 @@ function Index() {
           setError(detail);
         }
         if (["success", "failure", "cancelled", "skipped"].includes(conclusion)) {
+          if (timer) { clearInterval(timer); timer = null; }
           await load(session, true);
         }
       } catch (x:any) {
@@ -161,13 +174,15 @@ function Index() {
     };
     // Even completed runs need one fetch after refresh to restore jobs and final logs.
     void poll();
-    const timer = completedAlready ? null : setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 15000);
+    if (!completedAlready) timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
     return () => { stopped = true; if(timer)clearInterval(timer); };
   }, [run?.id, runRepo, session?.token]);
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session || !runVersion) return;
+    if (String(run.status||"")!=="completed" || String(run.conclusion||"").toLowerCase()!=="success") return;
     let stopped = false;
+    let attempts = 0;
     let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       try {
@@ -178,23 +193,22 @@ function Index() {
           data: { token: session.token, type, version: runVersion, channel: runChannel }
         });
         if (stopped) return;
+        attempts++;
         if (r.release) {
           setHandoff(r.release);
           await load(session, true);
-          // A published release has completed its handoff. Stop polling the
-          // obsolete candidate, but preserve GitHub run details for inspection.
-          if (String(r.release.status || "").toLowerCase() === "published" && timer) {
-            clearInterval(timer); timer = null;
-          }
+          if (timer) { clearInterval(timer); timer = null; }
+        } else if (attempts>=20 && timer) {
+          clearInterval(timer); timer = null;
         }
       } catch (x:any) {
         if (!stopped) setError(x?.message || "Unable to read the License Manager handoff state.");
       }
     };
-    timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 30000);
+    timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
     void poll();
     return () => { stopped = true; if (timer) clearInterval(timer); };
-  }, [run?.id, runRepo, session?.token, runVersion, runChannel]);
+  }, [run?.id, run?.status, run?.conclusion, runRepo, session?.token, runVersion, runChannel]);
 
   const stats = useMemo(() => {
     const all = [...(data.base.releases || []), ...(data.engine.releases || [])];
@@ -216,10 +230,19 @@ function Index() {
   };
 
   const resumeReleaseRun = (type: ReleaseType, draft: any, attempt: any) => {
-    const repo = String(type === "base"
+    const activeSourceRepo=String(type==="base"
+      ? (data.base.repositories?.base?.repo || "")
+      : (data.engine.repositories?.engine?.repo || ""));
+    const activeWorkerRepo=String(type==="base"
       ? (data.base.repositories?.base?.workerRepo || "")
       : (data.engine.repositories?.engine?.repo || ""));
-    if(!repo){setError("Active GitHub profile release worker repository is unavailable. Refresh Configuration before resuming this run.");return}
+    const repo=activeReleaseRunRepository({
+      sourceRepo:draft.source_repo,
+      runUrl:attempt.run_url || draft.last_run_url || "",
+      activeSourceRepo,
+      activeWorkerRepo
+    });
+    if(!repo){setError("This release attempt belongs to the inactive GitHub profile. Switch source mode back to inspect that GitHub run; its saved history has not been deleted.");return}
     setRun({
       id: Number(attempt.run_id),
       status: String(attempt.status || "queued"),
@@ -298,7 +321,7 @@ function Index() {
           ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · locked bootstrap snapshot · ${r.files.length} tracked files · targets: ${detectedComponents.join(", ")||"none"}.`
           : r.hasSourceChanges
             ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · ${r.files.length} file changes since published ${type==="base"?"Base":"Update"} baseline · +${summary.added||0} added · ~${summary.modified||0} modified · −${summary.deleted||0} deleted${summary.renamed?` · ${summary.renamed} renamed`:""}${type==="engine"&&detectedComponents.length?` · targets: ${detectedComponents.join(", ")}`:""}.`
-            : `${r.repo}@${r.ref} is already up to date with the published ${type==="base"?"Base":"Update"} baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
+            : type==="engine" ? `${r.repo}@${r.ref} matches the published Update baseline. No Engine/add-on source changes were detected; you can still select BASE and the worker will capture current base-release changes before packaging.` : `${r.repo}@${r.ref} is already up to date with the published Base baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
     } catch (x: any) {
       setError(x.message || "Unable to inspect source.");
     } finally { setBusy(""); }
@@ -399,6 +422,7 @@ function Index() {
               onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={Boolean(data.engine.repositories?.engine?.repo)&&runRepo === data.engine.repositories.engine.repo ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
+            {tab === "database" && <DatabaseSystemWorkspace session={session} />}
             {tab === "mcp-controls" && <McpControlsWorkspace session={session} />}
             {tab === "repositories" && <RepositoriesPage data={data} session={session} onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")} />}
             {tab === "channels" && <ChannelsPage channels={availableChannels} data={data} session={session} />}
@@ -479,6 +503,7 @@ const NAV_GROUPS = [
     ["base","Base Releases","Build, package & handoff",Rocket],
     ["engine","Update Releases","Detect, package & handoff",Layers3],
     ["operations","Operations","Secondary service operations",Terminal],
+    ["database","Database","Master DB build & deploy control",Boxes],
   ]},
   {label:"Networking",items:[
     ["mcp-controls","MCP Controls","Private ChatGPT / Codex control",KeyRound],
@@ -626,7 +651,7 @@ function buildChangelog(type: ReleaseType, data: any) {
   const changes = initialRelease
     ? `No previously published Base release exists in this channel. This initial Base deployment will package the complete current source snapshot (${files.length} tracked files).`
     : initialUpdate
-      ? `No previously published Update exists in this channel. v${String(data.baseline?.initialReleaseVersion||data.version||"1.0.0")} is the locked Engine snapshot baseline at ${String(data.baseline?.sourceSha||data.head||"").slice(0,12)||"the inspected UPDATE_RELEASE SHA"}. It establishes the initial Update source baseline. BASE may also be selected as an Update target so the updater can patch an existing Base installation; future releases compare against this published source SHA and contain only the newly detected change set.`
+      ? `No previously published Update exists in this channel. v${String(data.baseline?.initialReleaseVersion||data.version||"1.0")} is the locked Engine snapshot baseline at ${String(data.baseline?.sourceSha||data.head||"").slice(0,12)||"the inspected UPDATE_RELEASE SHA"}. It establishes the initial Update source baseline. BASE may also be selected as an Update target so the updater can patch an existing Base installation; future releases compare against this published source SHA and contain only the newly detected change set.`
     : files.length
     ? `This ${base ? "deployment" : "update"} contains ${files.length} changed source file${files.length === 1 ? "" : "s"}.${base ? "" : ` The selected components are ${(data.components || []).map((x:string)=>x.toUpperCase()).join(", ") || "not specified"}.`}`
     : `No source file changes were detected against the previous published ${base ? "Base" : "Update"} release. There is nothing new to release, so dispatch is blocked until source files change.`;
@@ -656,7 +681,7 @@ ${commitLines}
 ${checks}
 
 ## Compatibility
-${base ? "This is a complete Base deployment; normal Base deployment compatibility checks apply." : `Minimum Base version: ${data.minBase || "1.0.0"}\nMinimum updater/deployer protocol: ${data.protocol || "1"}`}
+${base ? "This is a complete Base deployment; normal Base deployment compatibility checks apply." : `Minimum Base version: ${data.minBase || "1.0"}\nMinimum updater/deployer protocol: ${data.protocol || "2"}`}
 
 ## What happens next?
 The release will be sent to License Master for technical validation. If those checks pass, it moves to the next review stage.
