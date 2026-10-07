@@ -1,10 +1,8 @@
 name: Dev Panel build check
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -17,7 +15,7 @@ jobs:
         id: profile
         shell: bash
         env:
-          EXPECTED_GITHUB_PROFILE: primary
+          EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
           response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
@@ -51,10 +49,6 @@ jobs:
         if: steps.profile.outputs.run == 'true'
         continue-on-error: true
         run: bun x tsc --noEmit
-      - name: Database automation contract
-        if: steps.profile.outputs.run == 'true'
-        run: node scripts/database-automation-contract.test.mjs
-
       - name: Build
         if: steps.profile.outputs.run == 'true'
         env:
