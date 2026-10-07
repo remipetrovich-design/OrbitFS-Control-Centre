@@ -1250,6 +1250,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const selectedComponents = data.type === "engine"
    ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","apex","mcp","studio"].includes(x)))]
    : ["base"];
+ const databasePackages=await ensureAutomaticReleaseDatabasePackages(data.type,selectedComponents);
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
  const missingDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
  if(missingDetectedComponents.length)throw new Error(`Stage 1 targets do not cover detected Update changes: ${missingDetectedComponents.join(", ")}. Re-inspect the Update source before building.`);
@@ -1286,6 +1287,13 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   changedFiles: dispatchFiles,
   changedFilesTruncated: detectedFiles.length > dispatchFiles.length,
   components: selectedComponents,
+  databasePreparation:{
+   mode:"automatic-central",
+   requiredComponents:databasePackages.requiredComponents,
+   sourceCommit:databasePackages.sourceCommit,
+   packageIds:(databasePackages.packages||[]).map((item:any)=>String(item?.id||"")).filter(Boolean),
+   reusedValidatedSource:databasePackages.reused===true
+  },
   minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0") : null,
   baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
   minimumUpdaterProtocol: data.type === "engine" ? (data.protocol || "2") : null,
@@ -1657,7 +1665,7 @@ const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] 
 const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
 
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
- const token=String(process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
+ const token=String(process.env.GITHUB_RELEASE_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
  if(!token)throw new Error("Master Database GitHub control token is not configured.");
  return requestJson("https://api.github.com"+path,{
   ...init,
@@ -1690,6 +1698,74 @@ async function latestDispatchedDatabaseRun(workflow:string,startedAt:number){
   if(found)return found;
  }
  return null;
+}
+
+function requiredDatabaseComponentsForRelease(type:"base"|"engine",components:string[]){
+ if(type==="base")return ["base"];
+ const selected=[...new Set((components||[]).map(value=>String(value||"").trim().toLowerCase()).filter(value=>["base","mcp","apex","studio"].includes(value)))];
+ const required:string[]=[];
+ if(selected.includes("base"))required.push("base");
+ const engineComponents=selected.filter(value=>["mcp","apex","studio"].includes(value));
+ if(engineComponents.length)required.push("engine-shared",...engineComponents);
+ return [...new Set(required)];
+}
+async function resolvedAutomaticDatabasePackages(requiredComponents:string[],expectedSourceCommit:string){
+ if(!requiredComponents.length)return {ready:true,packages:[] as any[]};
+ try{
+  const result=await licenseMaster("/database-packages/resolve?components="+encodeURIComponent(requiredComponents.join(",")));
+  const packages=Array.isArray(result?.packages)?result.packages:[];
+  const byComponent=new Map(packages.map((item:any)=>[String(item?.component||""),item]));
+  const ready=requiredComponents.every(component=>{
+   const item:any=byComponent.get(component);
+   return item&&String(item.sourceRepo||"")===MASTER_DATABASE_REPO&&String(item.sourceCommit||"")===expectedSourceCommit&&["candidate","current"].includes(String(item.status||"").toLowerCase());
+  });
+  return {ready,packages};
+ }catch{return {ready:false,packages:[] as any[]}}
+}
+async function ensureAutomaticReleaseDatabasePackages(type:"base"|"engine",components:string[]){
+ const requiredComponents=requiredDatabaseComponentsForRelease(type,components);
+ if(!requiredComponents.length)return {requiredComponents,packages:[] as any[],sourceCommit:null,workflowRun:null,reused:true};
+ let ref:any;
+ try{
+  ref=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+ }catch(error:any){
+  const message=String(error?.message||error||"");
+  if(/not found/i.test(message))throw new Error(`Dev Panel cannot access the central database repository ${MASTER_DATABASE_REPO}. Configure GITHUB_RELEASE_TOKEN with access to that repository before starting a Base/Update release.`);
+  throw error;
+ }
+ const sourceCommit=String(ref?.object?.sha||"").trim();
+ if(!/^[a-f0-9]{40}$/i.test(sourceCommit))throw new Error("Could not resolve the central database source commit.");
+
+ let resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
+ if(resolved.ready)return {requiredComponents,packages:resolved.packages,sourceCommit,workflowRun:null,reused:true};
+
+ let runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,10);
+ let workflowRun=runs.find((run:any)=>run.headSha===sourceCommit&&["queued","in_progress","waiting","requested","pending"].includes(String(run.status||"").toLowerCase()))||null;
+ const successful=runs.find((run:any)=>run.headSha===sourceCommit&&String(run.conclusion||"").toLowerCase()==="success");
+ if(!workflowRun&&successful){
+  resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
+  if(!resolved.ready)throw new Error(`Central database validation passed for ${sourceCommit.slice(0,8)}, but License Manager has no registered database candidate for: ${requiredComponents.join(", ")}. The Master Database workflow must have ORBITFS_LICENSE_MANAGER_URL and ORBITFS_LICENSE_MANAGER_TOKEN configured so validated packages are registered.`);
+ }
+ if(!workflowRun&&!successful){
+  const startedAt=Date.now();
+  await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_BUILD_WORKFLOW)}/dispatches`,{
+   method:"POST",
+   body:JSON.stringify({ref:MASTER_DATABASE_REF})
+  });
+  workflowRun=await latestDispatchedDatabaseRun(MASTER_DATABASE_BUILD_WORKFLOW,startedAt);
+ }
+
+ for(let attempt=0;attempt<45;attempt++){
+  resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
+  if(resolved.ready)return {requiredComponents,packages:resolved.packages,sourceCommit,workflowRun,reused:false};
+  runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,10);
+  const matching=runs.find((run:any)=>run.headSha===sourceCommit);
+  if(matching&&matching.status==="completed"&&matching.conclusion&&matching.conclusion!=="success"){
+   throw new Error("Automatic central database validation failed. Open Database Operations to inspect the failed run.");
+  }
+  await new Promise(resolve=>setTimeout(resolve,1000));
+ }
+ throw new Error("Automatic central database preparation did not become ready for this release. Open Database Operations to inspect the validation run.");
 }
 
 export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
@@ -1726,12 +1802,26 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   packages.filter((row:any)=>row.component===component&&row.status==="current").sort((a:any,b:any)=>new Date(b.publishedAt||b.createdAt||0).getTime()-new Date(a.publishedAt||a.createdAt||0).getTime())[0]||null
  ]));
  const candidates=packages.filter((row:any)=>row.status==="candidate").sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime());
+ const headSha=String(refInfo?.object?.sha||"");
+ const ready=Object.fromEntries(MASTER_DATABASE_COMPONENTS.map(component=>[
+  component,
+  packages.filter((row:any)=>row.component===component&&["candidate","current"].includes(row.status)&&row.sourceRepo===MASTER_DATABASE_REPO&&row.sourceCommit===headSha)
+   .sort((a:any,b:any)=>new Date(b.createdAt||b.publishedAt||0).getTime()-new Date(a.createdAt||a.publishedAt||0).getTime())[0]||null
+ ]));
+ const deploymentEventsResult=await authClient().from("orbitfs_deployment_events").select("id,installation_id,event_type,status,message,detail,created_at").order("created_at",{ascending:false}).limit(80);
+ const activity=(Array.isArray(deploymentEventsResult?.data)?deploymentEventsResult.data:[])
+  .filter((row:any)=>{
+   const eventType=String(row?.event_type||"");
+   return eventType==="update.engine.preflight"||eventType.startsWith("database.migration.")||eventType.startsWith("base.database.migration.")||eventType.startsWith("deployment.");
+  })
+  .slice(0,30);
+ const latestValidation=buildRuns.find((run:any)=>run.headSha===headSha)||buildRuns[0]||null;
  return {
   ok:true,
   authority:"License Manager",
   repo:MASTER_DATABASE_REPO,
   ref:MASTER_DATABASE_REF,
-  headSha:String(refInfo?.object?.sha||""),
+  headSha,
   repoUrl:repoInfo?.html_url||`https://github.com/${MASTER_DATABASE_REPO}`,
   workflows:{
    build:buildRuns,
@@ -1741,6 +1831,15 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   },
   current,
   candidates,
+  ready,
+  activity,
+  automation:{
+   releaseIntegration:"automatic",
+   latestValidation,
+   centralReady:Boolean(latestValidation&&latestValidation.headSha===headSha&&latestValidation.conclusion==="success"&&MASTER_DATABASE_COMPONENTS.every(component=>Boolean((ready as any)[component]))),
+   baseFlow:["Base release","Central DB validation","License Manager package attach","Inner Deployer / customer database"],
+   updateFlow:["Update release","License Manager package attach","Inner Deployer verification","Shared Engine Host","Selected addon database additions"]
+  },
   policies:{
    productionApply:"manual-only",
    candidatePublication:"License Manager controlled",
