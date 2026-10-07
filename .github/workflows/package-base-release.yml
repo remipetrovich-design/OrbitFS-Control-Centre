@@ -15,7 +15,7 @@ on:
       source_repo:
         description: Authoritative Base source repository
         required: true
-        default: lucaskerim123/V1-vercel-base
+        default: remipetrovich-design/OrbitFS-Base-System
         type: string
       source_ref:
         description: Authoritative Base source ref
@@ -68,7 +68,7 @@ jobs:
         id: profile
         shell: bash
         env:
-          EXPECTED_GITHUB_PROFILE: primary
+          EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
           response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
@@ -86,11 +86,11 @@ jobs:
         if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
-            echo "::error::Missing Dev Panel Actions secret ORBITFS_RELEASE_DISPATCH_TOKEN."
+            echo "::error::Missing Dev Panel Actions secret ORBITFS_FALLBACK_GITHUB_TOKEN."
             exit 1
           }
 
@@ -102,16 +102,16 @@ jobs:
           SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
-          test "$SOURCE_REPO" = "lucaskerim123/V1-vercel-base" || { echo "::error::Base packaging is locked to lucaskerim123/V1-vercel-base."; exit 1; }
+          test "$SOURCE_REPO" = "remipetrovich-design/OrbitFS-Base-System" || { echo "::error::Base packaging is locked to remipetrovich-design/OrbitFS-Base-System."; exit 1; }
           test "$SOURCE_REF" = "base-release" || { echo "::error::Base packaging is locked to base-release."; exit 1; }
 
       - name: Checkout Base release branch
         if: steps.profile.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
-          repository: lucaskerim123/V1-vercel-base
+          repository: remipetrovich-design/OrbitFS-Base-System
           ref: base-release
-          token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Verify exact inspected Base source
@@ -154,11 +154,11 @@ jobs:
       - name: Verify private Base checkout credential
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
-            echo "::error::Missing Dev Panel Actions secret ORBITFS_RELEASE_DISPATCH_TOKEN. The default GITHUB_TOKEN cannot checkout the private repository ${{ inputs.source_repo }}."
+            echo "::error::Missing Dev Panel Actions secret ORBITFS_FALLBACK_GITHUB_TOKEN. The default GITHUB_TOKEN cannot checkout the private repository ${{ inputs.source_repo }}."
             exit 1
           }
 
@@ -169,8 +169,8 @@ jobs:
           SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
-          test "$SOURCE_REPO" = "lucaskerim123/V1-vercel-base" || {
-            echo "::error::Base packaging is locked to lucaskerim123/V1-vercel-base."
+          test "$SOURCE_REPO" = "remipetrovich-design/OrbitFS-Base-System" || {
+            echo "::error::Base packaging is locked to remipetrovich-design/OrbitFS-Base-System."
             exit 1
           }
           test "$SOURCE_REF" = "base-release" || {
@@ -181,9 +181,9 @@ jobs:
       - name: Checkout Base release branch
         uses: actions/checkout@v4
         with:
-          repository: lucaskerim123/V1-vercel-base
+          repository: remipetrovich-design/OrbitFS-Base-System
           ref: base-release
-          token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
           fetch-depth: 0
           path: base-source
 
@@ -201,100 +201,85 @@ jobs:
             echo "::error::base-release moved after Dev Panel inspection. Expected $EXPECTED_SHA, current head is $ACTUAL_SHA. Refresh the Base release in Dev Panel and package again."
             exit 1
           }
-          echo "Confirmed Base source: lucaskerim123/V1-vercel-base@base-release ($ACTUAL_SHA)"
+          echo "Confirmed Base source: remipetrovich-design/OrbitFS-Base-System@base-release ($ACTUAL_SHA)"
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Resolve Master Database Base package
+      - name: Build authoritative customer database snapshot
+        working-directory: base-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-package
+          SCHEMA_VERSION="$(sed -n 's/^ORBITFS_SCHEMA_VERSION=//p' .env.example | head -n 1 | tr -d '"'"'"'')"
+          test -f tools/build-customer-schema.mjs || { echo "::error::Base source is missing tools/build-customer-schema.mjs"; exit 1; }
+          node tools/build-customer-schema.mjs \
+            --schema-version "${SCHEMA_VERSION:-1}" \
+            --output supabase/customer-schema.sql \
+            --metadata release-package/database-schema.json
+          test -s supabase/customer-schema.sql || { echo "::error::customer-schema.sql was not generated"; exit 1; }
+
+      - name: Verify generated database snapshot is current
+        working-directory: base-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_source_migration="$(find supabase/migrations -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.sql' -printf '%f\n' | sort | tail -n1 | cut -c1-14)"
+          packaged_latest_migration="$(jq -r '.latestMigration // empty' release-package/database-schema.json)"
+          migration_count_source="$(find supabase/migrations -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.sql' | wc -l | tr -d ' ')"
+          migration_count_packaged="$(jq -r '.migrationCount // 0' release-package/database-schema.json)"
+          test -n "$latest_source_migration" || { echo "::error::No Base migrations found."; exit 1; }
+          test "$packaged_latest_migration" = "$latest_source_migration" || {
+            echo "::error::Generated customer DB snapshot is stale. Source latest migration is $latest_source_migration but package metadata reports $packaged_latest_migration."
+            exit 1
+          }
+          test "$migration_count_packaged" = "$migration_count_source" || {
+            echo "::error::Generated customer DB snapshot migration count mismatch. Source has $migration_count_source migrations but package metadata reports $migration_count_packaged."
+            exit 1
+          }
+          echo "Customer DB snapshot is current: $migration_count_packaged migrations, latest $packaged_latest_migration."
+
+      - name: Register Base database package candidate
         id: database-package
         working-directory: base-source
         shell: bash
         env:
           LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
           test -n "$LICENSE_MASTER_API_TOKEN" || { echo "::error::Missing LICENSE_MASTER_API_TOKEN in Dev Panel repository secrets"; exit 1; }
           node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
-          mkdir -p release-package supabase/migrations
-
-          resolver_file="$(mktemp)"
-          package_response_file="$(mktemp)"
-          trap 'rm -f "$resolver_file" "$package_response_file"' EXIT
-
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-            -o "$resolver_file" \
-            "${LICENSE_MASTER_URL%/}/database-packages/resolve?components=base&include_payload=true"
-          jq -e '.ok==true and (.packages|length)==1 and .packages[0].component=="base" and (.packages[0].payload|type=="object")' "$resolver_file" >/dev/null || {
-            echo "::error::License Manager did not resolve one authoritative Base database package."
-            cat "$resolver_file"
+          test -f tools/build-database-package.mjs || { echo "::error::Base source is missing tools/build-database-package.mjs"; exit 1; }
+          schema_version="$(jq -r '.schemaVersion // empty' release-package/database-schema.json)"
+          test -n "$schema_version" || { echo "::error::Generated Base database schema version is missing."; exit 1; }
+          node tools/build-database-package.mjs \
+            --commit "$SOURCE_SHA" \
+            --schema-version "$schema_version" \
+            --snapshot supabase/customer-schema.sql \
+            --metadata release-package/database-schema.json \
+            --output release-package/base-database-package.json
+          test -s release-package/base-database-package.json
+          test "$(jq -r '.sourceRepo // empty' release-package/base-database-package.json)" = "$SOURCE_REPO" || {
+            echo "::error::Base database package source repository does not match the active Base source. Expected $SOURCE_REPO."
             exit 1
           }
-          jq '{ok:.ok,package:.packages[0]}' "$resolver_file" > "$package_response_file"
-          package_id="$(jq -r '.package.id // empty' "$package_response_file")"
-          package_origin="$(jq -r '.package.resolutionSource // "unknown"' "$package_response_file")"
-          test -n "$package_id" || { echo "::error::License Manager resolver returned no Base database package id."; exit 1; }
-          echo "Using License Manager resolved Base database package: $package_id ($package_origin)"
-
-          DATABASE_PACKAGE_ORIGIN="$package_origin" node - "$package_response_file" <<'NODE'
-          const fs=require("fs"),path=require("path"),crypto=require("crypto");
-          const body=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));
-          const row=body.package,p=row?.payload;
-          if(!body.ok||!p||p.format!=="orbitfs-customer-database-package-v1"||p.component!=="base")throw new Error("Invalid central Base database package");
-          const sourceRepo=String(p.sourceRepo||"").trim();
-          const sourceCommit=String(p.sourceCommit||"").trim();
-          if(!sourceRepo||!/^[a-f0-9]{40}$/.test(sourceCommit))throw new Error("Central Base package source identity is invalid");
-          if(sourceRepo!==String(row.sourceRepo||"").trim()||sourceCommit!==String(row.sourceCommit||"").trim())throw new Error("Central Base package payload identity does not match License Manager metadata");
-          if(process.env.DATABASE_PACKAGE_ORIGIN==="central"&&sourceRepo!=="lucaskerim123/Master-Database-System")throw new Error("License Manager central Base package has an unexpected source repository");
-          const snapshot=p.snapshot;
-          if(!snapshot||snapshot.encoding!=="base64"||typeof snapshot.data!=="string")throw new Error("Central Base package is missing its fresh-install snapshot");
-          const snapshotBytes=Buffer.from(snapshot.data,"base64");
-          const snapshotSha=crypto.createHash("sha256").update(snapshotBytes).digest("hex");
-          if(snapshotBytes.length!==Number(snapshot.size)||snapshotSha!==String(snapshot.sha256||"").toLowerCase())throw new Error("Central Base snapshot integrity failed");
-
-          fs.mkdirSync("supabase/migrations",{recursive:true});
-          for(const name of fs.readdirSync("supabase/migrations")){
-            if(name.toLowerCase().endsWith(".sql"))fs.rmSync(path.join("supabase/migrations",name),{force:true});
-          }
-          fs.writeFileSync("supabase/customer-schema.sql",snapshotBytes);
-
-          const migrations=Array.isArray(p.migrations)?p.migrations:[];
-          if(Number(p.migrationCount)!==migrations.length||!migrations.length)throw new Error("Central Base migration history is invalid");
-          const ids=[];
-          for(const m of migrations){
-            const file=String(m?.file||"").replaceAll("\\","/");
-            const match=file.match(/^supabase\/migrations\/(\d{14})_[A-Za-z0-9._-]+\.sql$/);
-            if(!match||m.component!=="base"||m.encoding!=="base64")throw new Error("Invalid central Base migration path: "+file);
-            const bytes=Buffer.from(m.data,"base64");
-            const sha=crypto.createHash("sha256").update(bytes).digest("hex");
-            if(bytes.length!==Number(m.size)||sha!==String(m.sha256||"").toLowerCase())throw new Error("Central Base migration integrity failed: "+file);
-            fs.writeFileSync(file,bytes);
-            ids.push(match[1]);
-          }
-          ids.sort();
-          const latest=ids.at(-1);
-          const metadata={
-            format:"orbitfs-central-base-database-v1",
-            schemaVersion:String(p.databaseSchemaVersion),
-            path:"supabase/customer-schema.sql",
-            sha256:snapshotSha,
-            migrationCount:migrations.length,
-            latestMigration:latest,
-            sourceRepo:p.sourceRepo,
-            sourceCommit:p.sourceCommit
-          };
-          fs.writeFileSync("release-package/database-schema.json",JSON.stringify(metadata,null,2));
-          fs.writeFileSync("release-package/base-database-package.json",JSON.stringify(p,null,2));
-          NODE
-
-          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceRepo:.package.sourceRepo,sourceCommit:.package.sourceCommit}' "$package_response_file")"
+          response="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages" \
+            -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @release-package/base-database-package.json)"
+          test "$(jq -r '.package.sourceRepo // empty' <<<"$response")" = "$SOURCE_REPO" || { echo "::error::License Manager registered the Base database package against the wrong source repository."; exit 1; }
+          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceRepo:.package.sourceRepo,sourceCommit:.package.sourceCommit}' <<<"$response")"
+          test "$(jq -r '.component' <<<"$reference")" = "base" || { echo "::error::License Manager returned a non-Base database package."; exit 1; }
+          test "$(jq -r '.sourceCommit' <<<"$reference")" = "$SOURCE_SHA" || { echo "::error::Base database package source commit does not match the release source."; exit 1; }
+          test "$(jq -r '.databaseSchemaVersion' <<<"$reference")" = "$schema_version" || { echo "::error::Base database package schema version does not match the release schema version."; exit 1; }
           jq -e '.id|type=="string" and length>0' <<<"$reference" >/dev/null
           jq -e '.sha256|test("^[a-f0-9]{64}$")' <<<"$reference" >/dev/null
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
-          echo "Base database material resolved authoritatively by License Manager: $package_id"
 
       - name: Build release information
         working-directory: base-source
@@ -311,7 +296,7 @@ jobs:
           CONTROL_CHANGED_FILES: ${{ inputs.changed_files }}
         run: |
           set -euo pipefail
-          [[ "$VERSION" =~ ^[1-9][0-9]*(\.(0|[1-9][0-9]*)){1,3}$ ]] || { echo "::error::Invalid OrbitFS version. Use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4: $VERSION"; exit 1; }
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Invalid SemVer: $VERSION"; exit 1; }
           if [ -n "$CONTROL_NOTES" ]; then
             printf "%s\n" "$CONTROL_NOTES" > release-package/changelog.md
           else
