@@ -30,7 +30,7 @@ jobs:
         id: profile
         shell: bash
         env:
-          EXPECTED_GITHUB_PROFILE: fallback
+          EXPECTED_GITHUB_PROFILE: primary
         run: |
           set -euo pipefail
           response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
@@ -108,6 +108,10 @@ jobs:
       - name: Install app dependencies
         if: steps.profile.outputs.deploy == 'true'
         run: bun install --frozen-lockfile
+
+      - name: Database automation contract
+        if: steps.profile.outputs.deploy == 'true'
+        run: node scripts/database-automation-contract.test.mjs
 
       - name: Build Vercel production artifact
         if: steps.profile.outputs.deploy == 'true'
