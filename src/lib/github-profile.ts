@@ -35,7 +35,7 @@ const FALLBACK:GithubProfile={
 
 // Runtime/release operations are permanently bound to this repository family.
 // The persisted profile switch only decides which family is allowed to run.
-const LOCAL_PROFILE:GithubProfile=PRIMARY;
+const LOCAL_PROFILE:GithubProfile=FALLBACK;
 
 let profileCache:{name:GithubProfileName;expires:number}|null=null;
 
