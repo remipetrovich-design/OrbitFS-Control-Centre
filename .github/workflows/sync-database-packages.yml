@@ -1,4 +1,4 @@
-name: Database package sync disabled
+name: Legacy database package sync disabled
 
 on:
   workflow_dispatch:
@@ -10,8 +10,11 @@ jobs:
   disabled:
     runs-on: ubuntu-latest
     steps:
-      - name: Use release-bound database packaging
+      - name: Use Master Database System
         shell: bash
         run: |
-          echo "::error::Direct database-package synchronization is disabled. Base packages are built by the Base release workflow and Engine component packages are built by the Engine release workflow so they remain source-locked, release-bound and profile-safe."
+          echo "::error::Direct Dev Panel database-package synchronization is retired."
+          echo "::error::Database source/build/package work lives in lucaskerim123/Master-Database-System."
+          echo "::error::Use the Dev Panel Master Database controls to dispatch the central database workflows."
+          echo "License Manager remains the package/release authority; Base Deployer and Update Release consume its authorized package references."
           exit 1
