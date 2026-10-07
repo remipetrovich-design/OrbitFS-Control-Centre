@@ -226,7 +226,6 @@ export function OperationsWorkspace({session}:{session:any}){
         <div className="flex items-start justify-between gap-3">
          <div><p className="text-xs font-semibold">Full Scan</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">Runs the complete code/security review and production validation for the exact current main commit.</p></div>
          <div className="flex flex-wrap justify-end gap-2">
-          {fullRun?.html_url&&<a className="button-secondary" href={fullRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last full scan</a>}
           <button className="button-primary" onClick={()=>action(system.key,"ci")} disabled={!!busy}>{busy===system.key+"ci"?<Loader2 size={13} className="animate-spin"/>:<Play size={13}/>}Full Scan</button>
          </div>
         </div>
@@ -235,9 +234,8 @@ export function OperationsWorkspace({session}:{session:any}){
         <div className="flex items-start justify-between gap-3">
          <div><p className="text-xs font-semibold">Deploy</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">{productionCurrent?"Current main is already deployed.":fullCurrent?"Ready — exact current main passed Full Scan. Deploy will not scan again.":"Blocked until the exact current main commit passes Full Scan."}</p></div>
          <div className="flex flex-wrap justify-end gap-2">
-          {deployRun?.html_url&&<a className="button-secondary" href={deployRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last deploy</a>}
+          {run?.html_url&&<a className="button-secondary" href={run.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last run</a>}
           <button className="button-primary" onClick={()=>action(system.key,"deploy")} disabled={!!busy||!fullCurrent||productionCurrent}>{busy===system.key+"deploy"?<Loader2 size={13} className="animate-spin"/>:<Zap size={13}/>}Deploy</button>
-          {quickRun?.html_url&&<a className="button-secondary" href={quickRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last quick deploy</a>}
           <button className="button-secondary border-red-400/30 text-red-200" onClick={()=>action(system.key,"override-deploy")} disabled={!!busy}>{busy===system.key+"override-deploy"?<Loader2 size={13} className="animate-spin"/>:<AlertTriangle size={13}/>}Quick Deploy</button>
          </div>
         </div>
