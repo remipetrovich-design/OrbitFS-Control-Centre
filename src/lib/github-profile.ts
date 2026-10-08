@@ -39,13 +39,10 @@ const LOCAL_PROFILE:GithubProfile=FALLBACK;
 
 let profileCache:{name:GithubProfileName;expires:number}|null=null;
 
-function fallbackProfileName():GithubProfileName{
- return String(process.env.ORBITFS_GITHUB_PROFILE||"primary").trim().toLowerCase()==="fallback"?"fallback":"primary";
-}
-
 async function storedProfileName():Promise<GithubProfileName>{
  if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
- const base=String(process.env.LICENSE_MANAGER_URL||process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim().replace(/\/+$/,"");
+ const rawBase=String(process.env.LICENSE_MANAGER_URL||process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim().replace(/\/+$/,"");
+ const base=rawBase.endsWith("/api")?rawBase+"/v1":rawBase;
  try{
   const response=await fetch(base+"/github-profile",{cache:"no-store",signal:AbortSignal.timeout(5000)});
   if(!response.ok)throw new Error("License Manager profile endpoint returned "+response.status);
@@ -53,13 +50,13 @@ async function storedProfileName():Promise<GithubProfileName>{
   const raw=String(body?.profile||"").trim().toLowerCase();
   if(raw!=="primary"&&raw!=="fallback")throw new Error("License Manager source profile is invalid or missing.");
   const name=raw as GithubProfileName;
-  profileCache={name,expires:Date.now()+20*60*1000};
+  profileCache={name,expires:Date.now()+10000};
   return name;
  }catch(error){
-  if(profileCache)return profileCache.name;
-  const name=fallbackProfileName();
-  profileCache={name,expires:Date.now()+20*60*1000};
-  return name;
+  // Fail closed: never select the former account from stale cache or a local
+  // environment variable if License Manager source authority is unreachable.
+  profileCache=null;
+  throw new Error("License Manager source mode cannot be verified. Production GitHub operations are blocked.");
  }
 }
 

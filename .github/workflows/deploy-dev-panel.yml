@@ -20,9 +20,9 @@ jobs:
     environment:
       name: production
     env:
-      VERCEL_ORG_ID: team_W3fS0X03YCjNkD2BoqRj6Uld
-      VERCEL_PROJECT_ID: prj_o5ju4zFGSDZelX4SA7GAu3rQqtap
-      VERCEL_SCOPE: retroreview12-8045
+      VERCEL_ORG_ID: team_0fWVaLb24pyeeCRqqYu5G47K
+      VERCEL_PROJECT_ID: prj_24FvbyWw7CAEbiug1Ec18p51z7WJ
+      VERCEL_SCOPE: team_0fWVaLb24pyeeCRqqYu5G47K
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_CLI_VERSION: 59.23.1
     steps:
@@ -33,7 +33,7 @@ jobs:
           EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://incendiarynetworks.cc/api/v1/github-profile)"
           active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
           echo "Active GitHub profile: $active"
           echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
