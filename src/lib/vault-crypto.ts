@@ -35,7 +35,7 @@ async function deriveKey(password:string,salt:Uint8Array,iterations:number){
   return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations,hash:"SHA-256"},material,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
 }
 export async function createEnvelope(password:string,records:VaultRecord[],saltInput?:Uint8Array):Promise<VaultEnvelope>{
-  if(password.length<10)throw new Error("Vault password must be at least 10 characters.");
+  if(!/^[0-9]{6,}$/.test(password))throw new Error("Vault PIN must contain at least 6 digits (numbers only).");
   const salt=saltInput||crypto.getRandomValues(new Uint8Array(16));
   const iv=crypto.getRandomValues(new Uint8Array(12));
   const key=await deriveKey(password,salt,ITERATIONS);

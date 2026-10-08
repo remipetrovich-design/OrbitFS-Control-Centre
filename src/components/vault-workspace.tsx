@@ -42,15 +42,15 @@ export function VaultWorkspace({session}:{session:any}){
     event.preventDefault();setError("");setBusy(true);
     try{
       if(phase==="setup"){
-        if(password.length<10)throw new Error("Use a Vault password of at least 10 characters.");
-        if(password!==confirm)throw new Error("Vault passwords do not match.");
+        if(!/^[0-9]{6,}$/.test(password))throw new Error("Vault PIN must contain at least 6 digits (numbers only).");
+        if(password!==confirm)throw new Error("Vault PINs do not match.");
         await persist([],password);setActivePassword(password);setRecords([]);setPhase("open");
       }else{
         if(!envelope)throw new Error("Encrypted Vault is unavailable.");
         const next=await decryptEnvelope(password,envelope);setRecords(next);setActivePassword(password);setPhase("open");
       }
       setPassword("");setConfirm("");
-    }catch(x:any){setError(phase==="setup"?(x.message||"Unable to create Vault."):"Wrong Vault password or unreadable Vault.")}
+    }catch(x:any){setError(phase==="setup"?(x.message||"Unable to create Vault."):"Wrong Vault PIN/password or unreadable Vault.")}
     finally{setBusy(false)}
   }
 
@@ -88,14 +88,14 @@ export function VaultWorkspace({session}:{session:any}){
   if(phase!=="open")return <section className="space-y-4">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
     <div className="mx-auto max-w-lg orbit-panel p-5">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Lock size={15}/></span><div><h2>{phase==="setup"?"Create Vault":"Unlock Vault"}</h2><p>{phase==="setup"?"Create the independent password used to encrypt this Vault.":"Your Dev Panel session is active. Unlock the encrypted Vault separately."}</p></div></div>
+      <div className="orbit-section-head"><span className="orbit-section-icon"><Lock size={15}/></span><div><h2>{phase==="setup"?"Create Vault":"Unlock Vault"}</h2><p>{phase==="setup"?"Create a numeric PIN of at least 6 digits to encrypt this Vault.":"Your Dev Panel session is active. Unlock the encrypted Vault separately."}</p></div></div>
       {error&&<div className="mt-4 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
       {phase==="loading"?<p className="mt-5 text-xs text-muted-foreground">Loading encrypted Vault…</p>:<form className="mt-5 space-y-4" onSubmit={unlock}>
-        <label className="block text-xs font-medium">Vault password<input className="control mt-1" type="password" autoComplete="off" value={password} onChange={e=>setPassword(e.target.value)} required/></label>
-        {phase==="setup"&&<label className="block text-xs font-medium">Confirm Vault password<input className="control mt-1" type="password" autoComplete="off" value={confirm} onChange={e=>setConfirm(e.target.value)} required/></label>}
+        <label className="block text-xs font-medium">Vault PIN<input className="control mt-1" type="password" inputMode="numeric" pattern={phase==="setup"?"[0-9]{6,}":undefined} minLength={phase==="setup"?6:undefined} autoComplete="off" value={password} onChange={e=>setPassword(e.target.value)} required/></label>
+        {phase==="setup"&&<label className="block text-xs font-medium">Confirm Vault PIN<input className="control mt-1" type="password" inputMode="numeric" pattern="[0-9]{6,}" minLength={6} autoComplete="off" value={confirm} onChange={e=>setConfirm(e.target.value)} required/></label>}
         <button className="button-primary w-full" disabled={busy}>{busy?"Working…":phase==="setup"?"Create encrypted Vault":"Unlock Vault"}</button>
       </form>}
-      <div className="mt-4 flex items-start gap-2 text-[10px] leading-5 text-muted-foreground"><ShieldCheck size={14} className="mt-0.5 shrink-0"/><span>The server stores encrypted ciphertext only. The Vault password is not saved and cannot be recovered.</span></div>
+      <div className="mt-4 flex items-start gap-2 text-[10px] leading-5 text-muted-foreground"><ShieldCheck size={14} className="mt-0.5 shrink-0"/><span>The server stores encrypted ciphertext only. The Vault PIN is not saved and cannot be recovered.</span></div>
     </div>
   </section>;
 
