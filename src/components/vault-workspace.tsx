@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X } from "lucide-react";
+import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye, EyeOff, Upload, Download } from "lucide-react";
 import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 
 const SYSTEMS=["Vercel","GitHub","Supabase","License Manager","Billing Store","Other"];
+const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v1",entries:[{system:"GitHub",service:"API",keyName:"GITHUB_TOKEN",secret:"REPLACE_WITH_SECRET"},{system:"Supabase",service:"Database",keyName:"SUPABASE_ACCESS_TOKEN",secret:"REPLACE_WITH_SECRET"}]};
 const SERVICES=["Environment","API","Billing","Licence","Database","Deployment","Dev","Custom"];
 
 export function VaultWorkspace({session}:{session:any}){
@@ -17,6 +18,9 @@ export function VaultWorkspace({session}:{session:any}){
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const [busy,setBusy]=useState(false);
+  const [visible,setVisible]=useState<string[]>([]);
+  const [draftVisible,setDraftVisible]=useState(false);
+  const [importRows,setImportRows]=useState<VaultRecord[]>([]);
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [draft,setDraft]=useState({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});
 
@@ -54,7 +58,7 @@ export function VaultWorkspace({session}:{session:any}){
     finally{setBusy(false)}
   }
 
-  function lock(){setRecords([]);setActivePassword("");setPassword("");setConfirm("");setEditing(null);setPhase("locked");setNotice("")}
+  function lock(){setVisible([]);setDraftVisible(false);setImportRows([]);setRecords([]);setActivePassword("");setPassword("");setConfirm("");setEditing(null);setPhase("locked");setNotice("")}
 
   async function save(event:React.FormEvent){
     event.preventDefault();setError("");setBusy(true);
@@ -66,6 +70,41 @@ export function VaultWorkspace({session}:{session:any}){
       await persist(next);setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
     finally{setBusy(false)}
+  }
+
+  function downloadTemplate(){
+    const blob=new Blob([JSON.stringify(IMPORT_TEMPLATE,null,2)+"\\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="orbitfs-vault-import-template.json";link.click();URL.revokeObjectURL(url);
+  }
+
+  async function prepareImport(event:React.ChangeEvent<HTMLInputElement>){
+    setError("");setNotice("");setImportRows([]);
+    const file=event.target.files?.[0];event.target.value="";if(!file)return;
+    try{
+      if(file.size>1024*1024)throw new Error("Import file must be 1 MB or smaller.");
+      const data=JSON.parse(await file.text());
+      if(data?.format!=="orbitfs-vault-import-v1"||!Array.isArray(data.entries))throw new Error("Use the OrbitFS Vault JSON template.");
+      if(!data.entries.length||data.entries.length>500)throw new Error("Import must contain 1–500 entries.");
+      const next=data.entries.map((item:any,index:number)=>{
+        if(!item||typeof item!=="object")throw new Error("Invalid entry at row "+(index+1));
+        const system=String(item.system||"").trim(),service=String(item.service||"").trim(),keyName=String(item.keyName||"").trim();
+        if(!system||!service||!keyName||typeof item.secret!=="string"||!item.secret.trim())throw new Error("Missing system, service, key name or secret at row "+(index+1));
+        if([system,service,keyName,item.secret].some(v=>v.length>10000))throw new Error("Entry too large at row "+(index+1));
+        return {id:crypto.randomUUID(),systems:[system],otherSystem:SYSTEMS.includes(system)?"":system,service,customService:SERVICES.includes(service)?"":service,keyName,secret:item.secret} as VaultRecord;
+      });
+      const keys=new Set<string>();for(const row of next){const key=row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase();if(keys.has(key))throw new Error("Duplicate entries in import: "+row.keyName);keys.add(key)}
+      setImportRows(next);
+    }catch(x:any){setError(x.message||"Unable to read import file.")}
+  }
+
+  async function confirmImport(){
+    setBusy(true);setError("");
+    try{
+      const existing=new Set(records.map(row=>row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase()));
+      const additions=importRows.filter(row=>!existing.has(row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase()));
+      if(!additions.length)throw new Error("All imported entries already exist. Nothing was changed.");
+      await persist([...additions,...records]);setImportRows([]);setNotice("Imported "+additions.length+" entries. "+(importRows.length-additions.length)+" existing entries skipped.");
+    }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
   }
 
   async function remove(id:string){
@@ -111,13 +150,18 @@ export function VaultWorkspace({session}:{session:any}){
         {draft.system==="Other"&&<label className="block text-xs font-medium">Other system<input className="control mt-1" value={draft.otherSystem} onChange={e=>setDraft({...draft,otherSystem:e.target.value})}/></label>}
         {draft.service==="Custom"&&<label className="block text-xs font-medium">Custom service<input className="control mt-1" value={draft.customService} onChange={e=>setDraft({...draft,customService:e.target.value})}/></label>}
         <label className="block text-xs font-medium">Key name<input className="control mt-1" autoComplete="off" value={draft.keyName} onChange={e=>setDraft({...draft,keyName:e.target.value})}/></label>
-        <label className="block text-xs font-medium">Secret<input className="control mt-1 font-mono" type="password" autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/></label>
+        <label className="block text-xs font-medium">Secret<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide secret":"Show secret"}</button></label>
       </div>
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""})}}><X size={14}/> Cancel</button>}</div>
     </form>
+    <section className="orbit-panel p-4 space-y-3">
+      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import Vault entries</h2><p>Import a JSON template. Existing matching system, service and key names are skipped; secrets never leave the unlocked Vault except in your chosen local file.</p></div></div>
+      <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
+      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.systems[0]} / {row.service} / {row.keyName}</p>)}</div><div className="flex gap-2"><button type="button" className="button-primary" disabled={busy} onClick={()=>void confirmImport()}>Import entries</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
+    </section>
     <section className="orbit-panel overflow-hidden">
       <div className="border-b p-4"><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div>{filtered.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">{row.systems.join(" · ")} · {row.service}</p><p className="mt-2 font-mono text-xs tracking-widest text-muted-foreground">••••••••••••</p></div><div className="flex gap-1"><button className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}{!filtered.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}</div>
+      <div>{filtered.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">{row.systems.join(" · ")} · {row.service}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?row.secret:"••••••••••••"}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}{!filtered.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}</div>
     </section>
   </section>;
 }
