@@ -1311,9 +1311,10 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   changed_files:JSON.stringify(dispatchFiles),
   previous_source_commit:previousSourceCommit,
  };
- if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
+ if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head,database_source_commit:String(databasePackages.sourceCommit||"")});
  if(data.type==="engine")Object.assign(inputs,{
   source_sha:head,
+  database_source_commit:String(databasePackages.sourceCommit||""),
   base:String(selectedComponents.includes("base")),
   apex:String(selectedComponents.includes("apex")),
   mcp:String(selectedComponents.includes("mcp")),
@@ -1744,15 +1745,25 @@ async function ensureAutomaticReleaseDatabasePackages(type:"base"|"engine",compo
  const successful=runs.find((run:any)=>run.headSha===sourceCommit&&String(run.conclusion||"").toLowerCase()==="success");
  if(!workflowRun&&successful){
   resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
-  if(!resolved.ready)throw new Error(`Central database validation passed for ${sourceCommit.slice(0,8)}, but License Manager has no registered database candidate for: ${requiredComponents.join(", ")}. The Master Database workflow must have ORBITFS_LICENSE_MANAGER_URL and ORBITFS_LICENSE_MANAGER_TOKEN configured so validated packages are registered.`);
+  if(!resolved.ready){
+   if(type==="base")return {requiredComponents,packages:[] as any[],sourceCommit,workflowRun:successful,reused:false,pending:true};
+   throw new Error(`Central database validation passed for ${sourceCommit.slice(0,8)}, but License Manager has no registered database candidate for: ${requiredComponents.join(", ")}. The Master Database workflow must have ORBITFS_LICENSE_MANAGER_URL and ORBITFS_LICENSE_MANAGER_TOKEN configured so validated packages are registered.`);
+  }
  }
  if(!workflowRun&&!successful){
-  const startedAt=Date.now();
   await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_BUILD_WORKFLOW)}/dispatches`,{
    method:"POST",
    body:JSON.stringify({ref:MASTER_DATABASE_REF})
   });
+  if(type==="base"){
+   return {requiredComponents,packages:[] as any[],sourceCommit,workflowRun:null,reused:false,pending:true};
+  }
+  const startedAt=Date.now();
   workflowRun=await latestDispatchedDatabaseRun(MASTER_DATABASE_BUILD_WORKFLOW,startedAt);
+ }
+
+ if(type==="base"&&workflowRun){
+  return {requiredComponents,packages:[] as any[],sourceCommit,workflowRun,reused:false,pending:true};
  }
 
  for(let attempt=0;attempt<45;attempt++){
