@@ -21,6 +21,7 @@ export function VaultWorkspace({session}:{session:any}){
   const [visible,setVisible]=useState<string[]>([]);
   const [draftVisible,setDraftVisible]=useState(false);
   const [importRows,setImportRows]=useState<VaultRecord[]>([]);
+  const [importMode,setImportMode]=useState<"skip"|"override">("skip");
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [draft,setDraft]=useState({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});
 
@@ -100,10 +101,18 @@ export function VaultWorkspace({session}:{session:any}){
   async function confirmImport(){
     setBusy(true);setError("");
     try{
-      const existing=new Set(records.map(row=>row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase()));
-      const additions=importRows.filter(row=>!existing.has(row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase()));
-      if(!additions.length)throw new Error("All imported entries already exist. Nothing was changed.");
-      await persist([...additions,...records]);setImportRows([]);setNotice("Imported "+additions.length+" entries. "+(importRows.length-additions.length)+" existing entries skipped.");
+      const identity=(row:VaultRecord)=>row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase();
+      const existing=new Map(records.map(row=>[identity(row),row]));
+      const additions=importRows.filter(row=>!existing.has(identity(row)));
+      const overrides=importMode==="override"?importRows.filter(row=>existing.has(identity(row))):[];
+      const replacements=new Map(overrides.map(row=>[identity(row),row]));
+      if(!additions.length&&!overrides.length)throw new Error("All imported entries already exist. Nothing was changed.");
+      const next=records.map(row=>{
+        const replacement=replacements.get(identity(row));
+        return replacement?{...replacement,id:row.id}:row;
+      });
+      await persist([...additions,...next]);setImportRows([]);
+      setNotice("Added "+additions.length+" entries, replaced "+overrides.length+" entries, skipped "+(importRows.length-additions.length-overrides.length)+".");
     }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
   }
 
@@ -155,9 +164,9 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""})}}><X size={14}/> Cancel</button>}</div>
     </form>
     <section className="orbit-panel p-4 space-y-3">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import Vault entries</h2><p>Import a JSON template. Existing matching system, service and key names are skipped; secrets never leave the unlocked Vault except in your chosen local file.</p></div></div>
+      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import Vault entries</h2><p>Import a JSON template. Choose whether matching system, service and key names are skipped or replaced. Imported secrets are encrypted before saving.</p></div></div>
       <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
-      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.systems[0]} / {row.service} / {row.keyName}</p>)}</div><div className="flex gap-2"><button type="button" className="button-primary" disabled={busy} onClick={()=>void confirmImport()}>Import entries</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
+      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.systems[0]} / {row.service} / {row.keyName}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label></fieldset><p className="text-xs text-muted-foreground">{importRows.filter(row=>records.some(saved=>saved.systems[0].toLowerCase()===row.systems[0].toLowerCase()&&saved.service.toLowerCase()===row.service.toLowerCase()&&saved.keyName.toLowerCase()===row.keyName.toLowerCase())).length} matching entries will be {importMode==="skip"?"skipped":"overwritten"}.</p><div className="flex gap-2"><button type="button" className="button-primary" disabled={busy} onClick={()=>void confirmImport()}>Import entries</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
     </section>
     <section className="orbit-panel overflow-hidden">
       <div className="border-b p-4"><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
