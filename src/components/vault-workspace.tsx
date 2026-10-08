@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye, EyeOff, Upload, Download } from "lucide-react";
 import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
+import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 
 const SYSTEMS=["Vercel","GitHub","Supabase","License Manager","Billing Store","Other"];
@@ -66,7 +67,7 @@ export function VaultWorkspace({session}:{session:any}){
     try{
       const system=draft.system.trim(),service=draft.service.trim(),keyName=draft.keyName.trim();
       if(!system||!service||!keyName||!draft.secret)throw new Error("System, service, key name and secret are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system==="Other"?(draft.otherSystem.trim()||"Other"):system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service:service==="Custom"?(draft.customService.trim()||"Custom"):service,customService:service==="Custom"?draft.customService.trim():"",keyName,secret:draft.secret};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system==="Other"?(draft.otherSystem.trim()||"Other"):system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service:service==="Custom"?(draft.customService.trim()||"Custom"):service,customService:service==="Custom"?draft.customService.trim():"",keyName,secret:draft.secret,vercelTargets:editing?.vercelTargets};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
@@ -135,6 +136,7 @@ export function VaultWorkspace({session}:{session:any}){
 
   if(phase!=="open")return <section className="space-y-4">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
+    <div className="orbit-panel p-4"><div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Vercel Production connections</h2><p>Main and Fallback account sync is available after you unlock the Vault. No Vercel variables change until you review and approve them.</p></div></div></div>
     <div className="mx-auto max-w-lg orbit-panel p-5">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Lock size={15}/></span><div><h2>{phase==="setup"?"Create Vault":"Unlock Vault"}</h2><p>{phase==="setup"?"Create a numeric PIN of at least 6 digits to encrypt this Vault.":"Your Dev Panel session is active. Unlock the encrypted Vault separately."}</p></div></div>
       {error&&<div className="mt-4 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
@@ -151,6 +153,8 @@ export function VaultWorkspace({session}:{session:any}){
     <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
+    <div className="orbit-panel p-3 text-xs"><strong className="text-sm">Vercel Production integration</strong><p className="mt-1 text-muted-foreground">Connect your Main or Fallback Vercel account below. Connections are separate and use stored encrypted tokens; a saved token does not mean the account has been verified.</p></div>
+    <VaultVercelSync session={session} records={records} onPersist={persist}/>
     <form onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit Vault entry":"New Vault entry"}</h2><p>Changes are encrypted in your browser before persistence.</p></div></div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -170,7 +174,7 @@ export function VaultWorkspace({session}:{session:any}){
     </section>
     <section className="orbit-panel overflow-hidden">
       <div className="border-b p-4"><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div>{filtered.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">{row.systems.join(" · ")} · {row.service}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?row.secret:"••••••••••••"}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}{!filtered.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}</div>
+      <div>{filtered.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?row.secret:"••••••••••••"}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}{!filtered.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}</div>
     </section>
   </section>;
 }

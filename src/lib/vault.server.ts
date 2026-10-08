@@ -16,7 +16,7 @@ function readSession(token:string):PanelUser{
   return user;
 }
 
-function requireVaultUser(token:string){
+export function requireVaultUser(token:string){
   const user=readSession(token);
   if(!["owner","admin"].includes(String(user.role||"").toLowerCase()))throw new Error("Vault access requires Owner or Admin access");
   return user;

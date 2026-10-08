@@ -6,6 +6,7 @@ export type VaultRecord={
   customService:string;
   keyName:string;
   secret:string;
+  vercelTargets?: Array<{connection:"main"|"fallback";projectId:string;projectName:string;keyName:string}>;
 };
 
 export type VaultEnvelope={
