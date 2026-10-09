@@ -1,11 +1,15 @@
 name: Repair Fallback Operations GitHub Token
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-fallback-operations-token.yml
 permissions:
   contents: read
 jobs:
   verify-and-install:
-    if: github.repository == 'remipetrovich-design/OrbitFS-Control-Centre' && github.ref == 'refs/heads/main'
+    if: github.repository == 'remipetrovich-design/OrbitFS-Control-Centre' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Run Fallback Operations token repair'))
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 7
