@@ -1,0 +1,51 @@
+name: Fallback Dev Panel Live Smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fallback-dev-panel-smoke.yml
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'remipetrovich-design/OrbitFS-Control-Centre'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test Fallback Dev Panel login and live dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://dev1.incendiarynetworks.cc'
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          check() {
+            local name="$1" route="$2" expected="$3"
+            local code
+            code="$(curl -sS --retry 3 --retry-delay 2 --max-time 20 -o "$tmp/$name.json" -w '%{http_code}' "$base$route")"
+            echo "$name HTTP $code"
+            if [ "$code" != "$expected" ]; then
+              head -c 1000 "$tmp/$name.json" | sed 's/[[:cntrl:]]//g'
+              echo
+              exit 1
+            fi
+          }
+          check panel / 200
+          check dependencies /api/health 200
+          node - "$tmp/dependencies.json" <<'NODE'
+          const fs = require('fs');
+          const health=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          console.log('DEPENDENCIES:', JSON.stringify(health));
+          if(health.ok!==true||health.database!=='ready'||health.license_manager_api!=='ready'||health.source_mode!=='fallback'){
+            throw new Error('Fallback Dev Panel dependencies are not ready');
+          }
+          NODE
+          check github_profile /api/github-profile 200
+          node - "$tmp/github_profile.json" <<'NODE'
+          const fs = require('fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(p.profile!=='fallback')throw new Error('Fallback Dev Panel received wrong GitHub source mode');
+          console.log('GitHub mode:',p.profile);
+          NODE
+          echo 'Fallback Dev Panel live smoke PASSED'
