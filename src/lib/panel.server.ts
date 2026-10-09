@@ -1826,6 +1826,8 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   packages.filter((row:any)=>row.component===component&&["candidate","current"].includes(row.status)&&row.sourceRepo===MASTER_DATABASE_REPO&&row.sourceCommit===headSha)
    .sort((a:any,b:any)=>new Date(b.createdAt||b.publishedAt||0).getTime()-new Date(a.createdAt||a.publishedAt||0).getTime())[0]||null
  ]));
+ const allComponentsReady=MASTER_DATABASE_COMPONENTS.every(component=>Boolean((ready as any)[component]));
+ const hasManualValidation=buildRuns.some((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&run.conclusion==="success");
  const deploymentEventsResult=await authClient().from("orbitfs_deployment_events").select("id,installation_id,event_type,status,message,detail,created_at").order("created_at",{ascending:false}).limit(80);
  const activity=(Array.isArray(deploymentEventsResult?.data)?deploymentEventsResult.data:[])
   .filter((row:any)=>{
@@ -1850,6 +1852,7 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   current,
   candidates,
   ready,
+  manualSync:{upToDate:allComponentsReady,canRun:!allComponentsReady&&hasManualValidation,reason:allComponentsReady?"All current-source database packages are already registered.":!hasManualValidation?"No successful manually validated package set exists for this source commit. Registration would fail; run the separate test validation first.":null},
   activity,
   automation:{
    releaseIntegration:"automatic",
@@ -1871,6 +1874,23 @@ export const runDatabaseSystemBuild=createServerFn({method:"POST"}).handler(asyn
  requireOperationsUser(data.token);
  const component=String(data.component||"all").trim().toLowerCase();
  if(!(MASTER_DATABASE_BUILD_TARGETS as readonly string[]).includes(component))throw new Error("Invalid database build target.");
+ if(data.registerCandidate){
+  if(component!=="all")throw new Error("Manual candidate sync must check the complete database component set.");
+  const source=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+  const headSha=String(source?.object?.sha||"");
+  if(!/^[a-f0-9]{40}$/i.test(headSha))throw new Error("Cannot verify central database source commit.");
+  const packages=await Promise.all(MASTER_DATABASE_COMPONENTS.map(async item=>{
+   const result=await licenseMaster(`/database-packages?component=${encodeURIComponent(item)}`);
+   const rows=Array.isArray(result?.packages)?result.packages:Array.isArray(result)?result:[];
+   return rows.some((row:any)=>String(row?.source_repo||row?.sourceRepo||"")===MASTER_DATABASE_REPO&&
+    String(row?.source_commit||row?.sourceCommit||"")===headSha&&
+    ["current","candidate"].includes(String(row?.status||"").toLowerCase()));
+  }));
+  if(packages.every(Boolean))return {ok:true,skipped:true,upToDate:true,message:"All central database packages are up to date; no workflow queued."};
+  const runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,20);
+  if(!runs.some((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&run.conclusion==="success"))
+   return {ok:true,skipped:true,requiresValidation:true,message:"No validated package set is available for this source commit. No workflow queued."};
+ }
  const startedAt=Date.now();
  await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_CONTROL_WORKFLOW)}/dispatches`,{
   method:"POST",
