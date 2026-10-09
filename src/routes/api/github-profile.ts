@@ -1,7 +1,8 @@
 import {createFileRoute} from "@tanstack/react-router";
 
 function licenseManagerProfileUrl(){
- const base=String(process.env.LICENSE_MANAGER_URL||process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim().replace(/\/+$/,"");
+ const base=String(process.env.LICENSE_MASTER_URL||"").trim().replace(/\/+$/,"");
+ if(base!=="https://lm.incendiarynetworks.cc/api/v1")throw new Error("Fallback License Manager URL is not configured correctly");
  return base+"/github-profile";
 }
 
