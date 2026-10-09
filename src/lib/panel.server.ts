@@ -24,12 +24,12 @@ const BASE_WORKFLOW=process.env.BASE_RELEASE_WORKER_WORKFLOW||"package-base-rele
 const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-release.yml";
 
 const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`Missing server environment variable: ${name}`);return v};
-const TRUSTED_MASTER_BOOTSTRAP_URL="https://incendiarynetworks.cc/api/v1";
+const TRUSTED_MASTER_BOOTSTRAP_URL=normalizeOfficialMasterUrl(required("LICENSE_MASTER_URL")) || (()=>{throw new Error("Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1")})();
 function normalizeOfficialMasterUrl(value:string){
  try{
   const u=new URL(String(value||"").trim());
   const host=u.hostname.toLowerCase(),path=u.pathname.replace(/\/+$/,"");
-  if(u.protocol!=="https:"||(host!=="incendiarynetworks.cc"&&!host.endsWith(".incendiarynetworks.cc"))||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
+  if(u.protocol!=="https:"||host!=="lm.incendiarynetworks.cc"||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
   return u.origin+"/api/v1";
  }catch{return null}
 }
