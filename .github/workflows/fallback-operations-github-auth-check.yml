@@ -1,0 +1,51 @@
+name: Fallback Operations GitHub Credential Check
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fallback-operations-github-auth-check.yml
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.repository == 'remipetrovich-design/OrbitFS-Control-Centre'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    env:
+      FALLBACK_GITHUB_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
+      RELEASE_GITHUB_TOKEN: ${{ secrets.GITHUB_RELEASE_TOKEN }}
+      DISPATCH_GITHUB_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Diagnose safe GitHub token status without revealing credentials
+        shell: bash
+        run: |
+          node <<'NODE'
+          const keys=['FALLBACK_GITHUB_TOKEN','RELEASE_GITHUB_TOKEN','DISPATCH_GITHUB_TOKEN'];
+          const repo=['OrbitFS-Control-Centre','OrbitFS-License-Administration','OrbitFS-Billing-Shopfront'];
+          const check=async()=>{
+            console.log('Fallback Vercel deployment credential available:',Boolean(process.env.VERCEL_TOKEN));
+            for(const key of keys){
+              const token=String(process.env[key]||'').trim();
+              if(!token){console.log(key+': NOT CONFIGURED IN GITHUB ACTIONS');continue;}
+              const headers={authorization:'Bearer '+token,accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
+              const request=async(path)=>{
+                try{
+                  const res=await fetch('https://api.github.com'+path,{headers,signal:AbortSignal.timeout(12000)});
+                  return {status:res.status,data:res.ok?await res.json():null};
+                }catch{return {status:'network_error',data:null};}
+              };
+              const user=await request('/user');
+              const correct=user.status===200&&String(user.data?.login||'').toLowerCase()==='remipetrovich-design';
+              console.log(key+': GitHub authenticated='+String(user.status===200)+', correct Fallback owner='+correct);
+              if(!correct)continue;
+              for(const name of repo){
+                const r=await request('/repos/remipetrovich-design/'+name+'/actions/runs?per_page=1');
+                console.log(key+': '+name+' Actions read HTTP '+r.status);
+              }
+            }
+          };
+          check().catch(e=>{console.error('Credential verification aborted: '+e.message);process.exitCode=1});
+          NODE
