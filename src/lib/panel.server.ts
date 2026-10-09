@@ -53,19 +53,11 @@ async function officialMasterConnections(force=false){
  officialApiRegistryCache={expires:Date.now()+20*60*1000,connections};
  return connections;
 }
-let configuredMasterUrlCache:{value:string;expires:number}|null=null;
-async function configuredMasterUrl(force=false){
- if(!force&&configuredMasterUrlCache&&configuredMasterUrlCache.expires>Date.now())return configuredMasterUrlCache.value;
- const official=await officialMasterConnections(force);
- const allowed=new Set(official.map((row:any)=>String(row.base_url)));
- let selected=allowed.has(TRUSTED_MASTER_BOOTSTRAP_URL)?TRUSTED_MASTER_BOOTSTRAP_URL:String(official[0]?.base_url||TRUSTED_MASTER_BOOTSTRAP_URL);
- try{
-  const {data}=await authClient().from("panel_api_connections").select("selected_url").eq("service_key","license_manager").maybeSingle();
-  const saved=normalizeOfficialMasterUrl(String(data?.selected_url||""));
-  if(saved&&allowed.has(saved))selected=saved;
- }catch{}
- configuredMasterUrlCache={value:selected,expires:Date.now()+20*60*1000};
- return selected;
+// Fallback always uses its own Vercel-configured authority URL. The old
+// shared panel_api_connections table is absent and must not be used to
+// introduce another source of truth or accidentally select Main's API.
+async function configuredMasterUrl(_force=false){
+ return TRUSTED_MASTER_BOOTSTRAP_URL;
 }
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
 const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
@@ -387,25 +379,18 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
 
 export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
- const [official,selectedUrl]=await Promise.all([officialMasterConnections(true),configuredMasterUrl()]);
- let row:any=null;
- try{const result=await authClient().from("panel_api_connections").select("*").eq("service_key","license_manager").maybeSingle();row=result.data||null;}catch{}
- return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl,officialConnections:official,connection:row};
+ const official=await officialMasterConnections(true);
+ return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl:TRUSTED_MASTER_BOOTSTRAP_URL,officialConnections:official,connection:{service_key:"license_manager",selected_url:TRUSTED_MASTER_BOOTSTRAP_URL,managed_by:"fallback_vercel_environment"}};
 });
 
 export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required");
  const requested=normalizeOfficialMasterUrl(data.url);
- if(!requested)throw new Error("API URL must be an official HTTPS /api/v1 endpoint.");
+ if(!requested||requested!==TRUSTED_MASTER_BOOTSTRAP_URL)throw new Error("Fallback Dev Panel is pinned to the configured Fallback License Manager API. Change LICENSE_MASTER_URL in the Fallback Vercel project to update it.");
  const official=await officialMasterConnections(true);
- if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
- const now=new Date().toISOString();
- const {error}=await authClient().from("panel_api_connections").upsert({service_key:"license_manager",selected_url:requested,updated_by:actor.email||actor.id,updated_at:now},{onConflict:"service_key"});
- if(error)throw new Error("Unable to save Dev Panel API connection: "+error.message);
- configuredMasterUrlCache=null;
- officialApiRegistryCache=null;
- return {ok:true,selectedUrl:requested};
+ if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("Fallback License Manager is not present in the official API registry.");
+ return {ok:true,selectedUrl:TRUSTED_MASTER_BOOTSTRAP_URL,managedBy:"fallback_vercel_environment"};
 });
 
 export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string}})=>{
