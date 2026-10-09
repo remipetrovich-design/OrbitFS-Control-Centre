@@ -1634,8 +1634,10 @@ async function github(path:string,init:RequestInit={}){
   else githubReadCache.clear();
   return value;
  }catch(error:any){
-  if(/rate limit/i.test(String(error?.message||error)))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
+  const message=String(error?.message||error);
+  if(/rate limit/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
   if(cached&&cached.staleUntil>Date.now())return cached.value;
+  if(/bad credentials/i.test(message))throw new Error("Fallback GitHub token rejected (401). Replace ORBITFS_FALLBACK_GITHUB_TOKEN in Fallback Dev Panel Vercel Production with an active Remi GitHub token. Update the matching GitHub Actions secret separately. Main credentials must not be used.");
   throw error;
  }
 }
@@ -1922,7 +1924,12 @@ async function repositorySyncConfig(){
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
  const token=required(cfg.side==="primary"?"ORBITFS_RELEASE_DISPATCH_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
- return requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
+ try{
+  return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
+ }catch(error:any){
+  if(/bad credentials/i.test(String(error?.message||error)))throw new Error("Fallback GitHub mirror credential rejected (401). Update ORBITFS_FALLBACK_GITHUB_TOKEN before using mirror sync.");
+  throw error;
+ }
 }
 function cleanRepositorySyncRun(run:any){
  return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name}:null;
