@@ -24,7 +24,14 @@ const BASE_WORKFLOW=process.env.BASE_RELEASE_WORKER_WORKFLOW||"package-base-rele
 const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-release.yml";
 
 const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`Missing server environment variable: ${name}`);return v};
-const TRUSTED_MASTER_BOOTSTRAP_URL=normalizeOfficialMasterUrl(required("LICENSE_MASTER_URL")) || (()=>{throw new Error("Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1")})();
+// Defer server-only environment access until a server handler actually runs.
+// TanStack Start may evaluate imported server function modules in the browser,
+// where process.env.LICENSE_MASTER_URL is intentionally unavailable.
+function trustedMasterBootstrapUrl():string{
+ const value=normalizeOfficialMasterUrl(required("LICENSE_MASTER_URL"));
+ if(!value)throw new Error("Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1");
+ return value;
+}
 function normalizeOfficialMasterUrl(value:string){
  try{
   const u=new URL(String(value||"").trim());
@@ -38,7 +45,7 @@ async function officialMasterConnections(force=false){
  if(!force&&officialApiRegistryCache&&officialApiRegistryCache.expires>Date.now())return officialApiRegistryCache.connections;
  let connections:any[]=[];
  try{
-  const url=new URL(TRUSTED_MASTER_BOOTSTRAP_URL+"/api-connections");
+  const url=new URL(trustedMasterBootstrapUrl()+"/api-connections");
   url.searchParams.set("client","dev_panel");url.searchParams.set("service","license_manager");
   const response=await fetch(url,{cache:"no-store",signal:AbortSignal.timeout(5000)});
   if(response.ok){
@@ -48,7 +55,7 @@ async function officialMasterConnections(force=false){
     .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
   }
  }catch{}
- if(!connections.length)connections=[{service_key:"license_manager",label:"Fallback License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
+ if(!connections.length)connections=[{service_key:"license_manager",label:"Fallback License Manager API",base_url:trustedMasterBootstrapUrl(),enabled:true,priority:10,settings:{bootstrap:true}}];
  connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
  officialApiRegistryCache={expires:Date.now()+20*60*1000,connections};
  return connections;
@@ -57,7 +64,7 @@ async function officialMasterConnections(force=false){
 // shared panel_api_connections table is absent and must not be used to
 // introduce another source of truth or accidentally select Main's API.
 async function configuredMasterUrl(_force=false){
- return TRUSTED_MASTER_BOOTSTRAP_URL;
+ return trustedMasterBootstrapUrl();
 }
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
 const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
@@ -380,17 +387,17 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
 export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
  const official=await officialMasterConnections(true);
- return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl:TRUSTED_MASTER_BOOTSTRAP_URL,officialConnections:official,connection:{service_key:"license_manager",selected_url:TRUSTED_MASTER_BOOTSTRAP_URL,managed_by:"fallback_vercel_environment"}};
+ return {authority:"orbitfs-license-manager",bootstrapUrl:trustedMasterBootstrapUrl(),selectedUrl:trustedMasterBootstrapUrl(),officialConnections:official,connection:{service_key:"license_manager",selected_url:trustedMasterBootstrapUrl(),managed_by:"fallback_vercel_environment"}};
 });
 
 export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required");
  const requested=normalizeOfficialMasterUrl(data.url);
- if(!requested||requested!==TRUSTED_MASTER_BOOTSTRAP_URL)throw new Error("Fallback Dev Panel is pinned to the configured Fallback License Manager API. Change LICENSE_MASTER_URL in the Fallback Vercel project to update it.");
+ if(!requested||requested!==trustedMasterBootstrapUrl())throw new Error("Fallback Dev Panel is pinned to the configured Fallback License Manager API. Change LICENSE_MASTER_URL in the Fallback Vercel project to update it.");
  const official=await officialMasterConnections(true);
  if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("Fallback License Manager is not present in the official API registry.");
- return {ok:true,selectedUrl:TRUSTED_MASTER_BOOTSTRAP_URL,managedBy:"fallback_vercel_environment"};
+ return {ok:true,selectedUrl:trustedMasterBootstrapUrl(),managedBy:"fallback_vercel_environment"};
 });
 
 export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string}})=>{
