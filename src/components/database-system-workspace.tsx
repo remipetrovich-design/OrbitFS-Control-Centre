@@ -51,10 +51,11 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
   .sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime()),[state]);
 
  const verifyAll=async()=>{
+  if(!state?.manualSync?.canRun)return;
   setBusy("verify");setError("");setNotice("");
   try{
    const result=await runDatabaseSystemBuild({data:{token:session.token,component:"all",registerCandidate:true,reason:"Dev Panel manual verify and sync"}});
-   setNotice(result?.run?.id?`Verification workflow #${result.run.id} queued.`:"Product database verification queued.");
+   setNotice(result?.skipped?result.message:result?.run?.id?`Verification workflow #${result.run.id} queued.`:"Product database verification queued.");
    await load();
   }catch(e:any){setError(e?.message||"Unable to verify product databases.")}
   finally{setBusy("")}
@@ -84,6 +85,8 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
  const components=["base","engine-shared","mcp","apex","studio"];
  const validation=state?.automation?.latestValidation;
  const automaticReady=state?.automation?.centralReady===true;
+ const syncState=state?.manualSync;
+ const syncDisabled=loading||Boolean(busy)||!syncState?.canRun;
 
  return <section className="orbit-screen space-y-4">
   <div className="orbit-reference-head">
@@ -173,7 +176,8 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
     <div className="rounded-lg border p-4">
      <div className="font-semibold">Verify & sync product databases</div>
      <p className="mt-1 text-xs leading-5 text-muted-foreground">Runs the same real Base + Shared Engine + addon validation used by automatic release preparation and refreshes License Manager candidates.</p>
-     <button className="button-primary mt-4" disabled={Boolean(busy)} onClick={()=>void verifyAll()}><RefreshCw size={14} className={busy==="verify"?"animate-spin":""}/>{busy==="verify"?"Verifying…":"Verify & sync product databases"}</button>
+      <button className="button-primary mt-4" disabled={syncDisabled} title={syncState?.reason||undefined} onClick={()=>void verifyAll()}><RefreshCw size={14} className={busy==="verify"?"animate-spin":""}/>{busy==="verify"?"Verifying…":syncState?.upToDate?"Up to date":syncState&&!syncState.canRun?"Verification unavailable":"Verify & sync product databases"}</button>
+      {syncState?.reason&&<p className="mt-2 text-xs text-muted-foreground">{syncState.reason}</p>}
     </div>
     <div className="rounded-lg border p-4">
      <div className="font-semibold">Rebuild package only</div>
