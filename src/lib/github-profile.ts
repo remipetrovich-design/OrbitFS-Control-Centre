@@ -41,7 +41,8 @@ let profileCache:{name:GithubProfileName;expires:number}|null=null;
 
 async function storedProfileName():Promise<GithubProfileName>{
  if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
- const rawBase=String(process.env.LICENSE_MANAGER_URL||process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim().replace(/\/+$/,"");
+ const rawBase=String(process.env.LICENSE_MASTER_URL||"").trim().replace(/\/+$/,"");
+ if(rawBase!=="https://lm.incendiarynetworks.cc/api/v1")throw new Error("Fallback License Manager URL must be configured before checking source mode.");
  const base=rawBase.endsWith("/api")?rawBase+"/v1":rawBase;
  try{
   const response=await fetch(base+"/github-profile",{cache:"no-store",signal:AbortSignal.timeout(5000)});
