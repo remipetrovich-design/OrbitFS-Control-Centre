@@ -282,7 +282,10 @@ export const login=createServerFn({method:"POST"}).handler(async({data}:{data:{e
  if(!email||!password)throw new Error("Email and password are required");
  const sb=authClient();
  const {data:user,error}=await sb.from("users").select("id,email,password_hash,password_salt,display_name,role,status").ilike("email",email).maybeSingle();
- if(error)throw new Error("Unable to connect to License Master users");
+ if(error){
+  console.error("Fallback Control Centre user lookup failed", {code:error.code, message:error.message, details:error.details, hint:error.hint});
+  throw new Error(`Unable to query License Master users (${error.code || "unknown"}): ${error.message || "Database request failed"}`);
+ }
  if(!user||user.status!=="active"||!verifyPassword(password,user.password_hash,user.password_salt))throw new Error("Invalid credentials");
  await sb.from("users").update({last_login_at:new Date().toISOString()}).eq("id",user.id);
  const safe={id:user.id,email:user.email,display_name:user.display_name,role:user.role};
