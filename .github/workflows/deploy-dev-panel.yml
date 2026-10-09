@@ -22,7 +22,7 @@ jobs:
     env:
       VERCEL_ORG_ID: team_0fWVaLb24pyeeCRqqYu5G47K
       VERCEL_PROJECT_ID: prj_24FvbyWw7CAEbiug1Ec18p51z7WJ
-      VERCEL_SCOPE: team_0fWVaLb24pyeeCRqqYu5G47K
+      VERCEL_SCOPE: splashincau-7868s-projects
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_CLI_VERSION: 59.23.1
     steps:
