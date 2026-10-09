@@ -6,7 +6,17 @@ export type VaultRecord={
   customService:string;
   keyName:string;
   secret:string;
+  purpose?:string;
+  valueSource?:string;
+  /** Main/Fallback are source modes, not key-name prefixes. */
+  usedIn?: Array<"main"|"fallback">;
+  /** Exact Vercel project name or GitHub owner/repository. Blank means not mapped. */
+  destinationSystem?: string;
+  /** Original prefixed name retained for an auditable, reversible migration. */
+  legacyKeyName?: string;
+  needsReview?: boolean;
   vercelTargets?: Array<{connection:"main"|"fallback";projectId:string;projectName:string;keyName:string}>;
+  githubTargets?: Array<{account:"main"|"fallback";repo:string;scope:"repository"|"production";kind:"secret"|"variable";keyName:string}>;
 };
 
 export type VaultEnvelope={

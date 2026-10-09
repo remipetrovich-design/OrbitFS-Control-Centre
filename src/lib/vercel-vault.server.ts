@@ -53,6 +53,8 @@ function normalizeEnvironment(v: any): VercelEnvMeta {
     gitBranch: typeof v?.gitBranch === "string" && v.gitBranch ? v.gitBranch : null,
     customEnvironmentIds: Array.isArray(v?.customEnvironmentIds) ? v.customEnvironmentIds.filter((id: any) => typeof id === "string") : [],
     visibility: typeof v?.visibility === "string" ? v.visibility : "",
+    // Do not return comments or values; only whether a human Vercel note flags a placeholder.
+    placeholderNote: /\\bPLACEHOLDER\\b|change-me/i.test(String(v?.comment||"")),
   };
 }
 async function readEnvironments(input: ProjectInput) {
@@ -87,7 +89,7 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
     validateConnection(data); validateProject(data.projectId);
     if (typeof data.value !== "string" || !data.value.trim() || data.value.length > 64000)
       throw new Error("A nonempty Vault value (maximum 64KB) is required.");
-    if (/^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|todo\b)/i.test(data.value.trim()))
+    if (/^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|todo\b|change-me(?:$|[-_ ]))/i.test(data.value.trim()))
       throw new Error("Vault placeholder values cannot be pushed to Production.");
     if (data.action !== "create" && data.action !== "replace") throw new Error("Invalid sync action.");
     // Compare a fresh server-side snapshot to the exact action reviewed in the browser.

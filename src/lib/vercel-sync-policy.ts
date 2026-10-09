@@ -7,6 +7,8 @@ export type VercelEnvMeta = {
   gitBranch: string | null;
   customEnvironmentIds: string[];
   visibility: string;
+  /** Only reflects the variable's comment, never its encrypted value. */
+  placeholderNote?: boolean;
 };
 
 export type ProductionPlan =
