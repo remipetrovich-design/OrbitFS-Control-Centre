@@ -137,7 +137,7 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
   </section>
 
   <section className="orbit-panel p-4">
-   <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 font-semibold"><PackageCheck size={16}/> Release database packages</div><span className={automaticReady?"text-xs text-emerald-500":"text-xs text-amber-500"}>{automaticReady?"Ready for releases":"Needs verification"}</span></div>
+   <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 font-semibold"><PackageCheck size={16}/> Release database packages</div><span className={automaticReady?"text-xs text-emerald-500":"text-xs text-amber-500"}>{automaticReady?"Ready for releases":state?.manualSync?.olderSourceCandidates?"Registered candidates · source changed":"Needs verification"}</span></div>
    <div className="mt-4 overflow-x-auto">
     <table className="w-full min-w-[700px] text-left text-sm">
      <thead className="text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="pb-2">Component</th><th className="pb-2">Release state</th><th className="pb-2">Schema</th><th className="pb-2">Central source</th><th className="pb-2">Package</th></tr></thead>
@@ -176,7 +176,7 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
     <div className="rounded-lg border p-4">
      <div className="font-semibold">Verify & sync product databases</div>
      <p className="mt-1 text-xs leading-5 text-muted-foreground">Runs the same real Base + Shared Engine + addon validation used by automatic release preparation and refreshes License Manager candidates.</p>
-      <button className="button-primary mt-4" disabled={syncDisabled} title={syncState?.reason||undefined} onClick={()=>void verifyAll()}><RefreshCw size={14} className={busy==="verify"?"animate-spin":""}/>{busy==="verify"?"Verifying…":syncState?.upToDate?"Up to date":syncState&&!syncState.canRun?"Verification unavailable":"Verify & sync product databases"}</button>
+      <button className="button-primary mt-4" disabled={syncDisabled} title={syncState?.reason||undefined} onClick={()=>void verifyAll()}><RefreshCw size={14} className={busy==="verify"?"animate-spin":""}/>{busy==="verify"?"Verifying…":syncState?.upToDate?"Up to date":syncState?.olderSourceCandidates?"Source changed":syncState&&!syncState.canRun?"Verification unavailable":"Verify & sync product databases"}</button>
       {syncState?.reason&&<p className="mt-2 text-xs text-muted-foreground">{syncState.reason}</p>}
     </div>
     <div className="rounded-lg border p-4">
