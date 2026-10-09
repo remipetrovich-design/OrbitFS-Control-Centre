@@ -48,7 +48,7 @@ async function officialMasterConnections(force=false){
     .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
   }
  }catch{}
- if(!connections.length)connections=[{service_key:"license_manager",label:"Primary License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
+ if(!connections.length)connections=[{service_key:"license_manager",label:"Fallback License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
  connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
  officialApiRegistryCache={expires:Date.now()+20*60*1000,connections};
  return connections;
@@ -415,8 +415,15 @@ export const testApiConnection=createServerFn({method:"POST"}).handler(async({da
  const official=await officialMasterConnections(true);
  if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
  const started=Date.now();
- const health=await requestJson(requested+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
- return {ok:true,url:requested,latencyMs:Date.now()-started,health};
+ const health=await requestJson(requested+"/license/health",{cache:"no-store"});
+ if(health?.ok!==true)throw new Error("Fallback License Manager health check did not pass.");
+ // The health endpoint is public and cannot verify machine credentials.
+ // Check a read-only endpoint using the real server-side token before reporting success.
+ const channels=await requestJson(requested+"/release-channels?include_disabled=false",{
+  headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"
+ });
+ if(!Array.isArray(channels?.channels))throw new Error("Authenticated release-channel response is invalid.");
+ return {ok:true,url:requested,latencyMs:Date.now()-started,health,authorization:"verified"};
 });
 
 export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
@@ -1605,6 +1612,9 @@ async function requestJson(url:string,init:RequestInit={}){
    }
  }
  if(!r.ok){
+   if(r.status===401 && new URL(url).hostname==="lm.incendiarynetworks.cc"){
+     throw new Error("Fallback License Manager rejected the Dev Panel API credential (401). Verify the Dev Panel LICENSE_MASTER_API_TOKEN is an active managed key with releases.read permission in Fallback License Manager.");
+   }
    if(contentType.includes("text/html")||/^\\s*<!doctype html/i.test(text)||/^\\s*<html/i.test(text)){
      throw new Error(`License Master API returned HTTP ${r.status} for ${new URL(url).pathname}. The configured LICENSE_MASTER_URL may point at a deployment that does not expose this API route.`);
    }
