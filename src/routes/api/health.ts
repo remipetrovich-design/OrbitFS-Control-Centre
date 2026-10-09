@@ -1,5 +1,5 @@
 import {createFileRoute} from "@tanstack/react-router";
-import {supabaseAdmin} from "@/integrations/supabase/client.server";
+import {createClient} from "@supabase/supabase-js";
 
 // Read-only dependency check. Do not return credentials, usernames or
 // upstream error bodies. This is safe for monitoring without logging in.
@@ -12,8 +12,19 @@ export const Route=createFileRoute("/api/health")({
     let licenseManager="unavailable";
     let sourceMode="unavailable";
     try{
-     const {error}=await supabaseAdmin.from("users").select("id",{head:true,count:"exact"});
-     if(!error)database="ready";
+     // Reuse the same Supabase authentication path as panel.server.ts,
+     // rather than a different helper that may hide an invalid key.
+     const url=String(process.env.SUPABASE_URL||"");
+     const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||"");
+     if(url&&key){
+      const client=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+      const [users,drafts,attempts]=await Promise.all([
+       client.from("users").select("id",{head:true,count:"exact"}),
+       client.from("panel_release_drafts").select("id",{head:true,count:"exact"}),
+       client.from("panel_release_attempts").select("id",{head:true,count:"exact"})
+      ]);
+      if(!users.error&&!drafts.error&&!attempts.error)database="ready";
+     }
     }catch{}
     try{
      const base=String(process.env.LICENSE_MASTER_URL||"").trim();
