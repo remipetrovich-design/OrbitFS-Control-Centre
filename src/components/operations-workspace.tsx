@@ -103,6 +103,7 @@ export function OperationsWorkspace({session}:{session:any}){
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
  useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
+ const operationsVerified=SYSTEMS.every(system=>Boolean(data.systems?.[system.key]?.repo&&data.systems?.[system.key]?.currentSha));
  useEffect(()=>{if(!live)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void load(true)},60000);return()=>clearInterval(t)},[live,load]);
  const liveConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status&&data.systems[key].run.status!=="completed");
  const liveConsoleSignature=liveConsoleKeys.join("|");
@@ -192,8 +193,11 @@ export function OperationsWorkspace({session}:{session:any}){
    </div>
   </section>
 
+  {!operationsVerified&&<div className="rounded-lg border border-amber-400/30 px-3 py-3 text-xs text-amber-100">
+   GitHub repository and deployment history is unverified. No run or deployment state will be reported until the Fallback GitHub credential is working.
+  </div>}
   <div className="space-y-3">
-   {SYSTEMS.map(system=>{
+   {(operationsVerified?SYSTEMS:[]).map(system=>{
     const s=data.systems?.[system.key]||{};
     const run=s.run;
     const fullRun=s.ciRun;
