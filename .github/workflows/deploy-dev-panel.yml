@@ -110,6 +110,10 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         run: bun install --frozen-lockfile
 
+      - name: Verify reverse source-domain routing safeguards
+        if: steps.profile.outputs.deploy == 'true'
+        run: node --experimental-strip-types --test tests/source-domain-routing.test.mjs
+
       - name: Build Vercel production artifact
         if: steps.profile.outputs.deploy == 'true'
         env:
