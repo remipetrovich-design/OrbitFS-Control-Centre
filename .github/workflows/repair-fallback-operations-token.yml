@@ -1,0 +1,72 @@
+name: Repair Fallback Operations GitHub Token
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-and-install:
+    if: github.repository == 'remipetrovich-design/OrbitFS-Control-Centre' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 7
+    env:
+      FALLBACK_GITHUB_TOKEN: ${{ secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Verify Fallback owner and least-privileged repository access
+        shell: bash
+        run: |
+          node <<'NODE'
+          (async()=>{
+            const token=String(process.env.FALLBACK_GITHUB_TOKEN||'').trim();
+            if(!token||token.length<16)throw new Error('Update production environment secret ORBITFS_FALLBACK_GITHUB_TOKEN with a valid Remi token first');
+            const headers={authorization:'Bearer '+token,accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
+            const request=async(path)=>{
+              const response=await fetch('https://api.github.com'+path,{headers,signal:AbortSignal.timeout(14000)});
+              if(!response.ok)throw new Error('GitHub rejected '+path+' with HTTP '+response.status);
+              return response.json();
+            };
+            const user=await request('/user');
+            if(String(user.login||'').toLowerCase()!=='remipetrovich-design'){
+              throw new Error('Refusing to install a token that does not belong to the Remi Fallback GitHub owner');
+            }
+            for(const name of ['OrbitFS-Control-Centre','OrbitFS-License-Administration','OrbitFS-Billing-Shopfront','OrbitFS-Base-System','OrbitFS_Engine']){
+              await request('/repos/remipetrovich-design/'+name);
+            }
+            for(const name of ['OrbitFS-Control-Centre','OrbitFS-License-Administration','OrbitFS-Billing-Shopfront']){
+              await request('/repos/remipetrovich-design/'+name+'/actions/runs?per_page=1');
+            }
+            if(!process.env.VERCEL_TOKEN)throw new Error('Fallback Vercel deployment token missing in GitHub Actions');
+            console.log('Validated Fallback GitHub token, owner and read access; no secret value printed');
+          })().catch(e=>{console.error(e.message);process.exitCode=1;});
+          NODE
+      - name: Install validated GitHub credential into Fallback Dev Panel Vercel Production
+        shell: bash
+        run: |
+          node <<'NODE'
+          (async()=>{
+            const team='team_0fWVaLb24pyeeCRqqYu5G47K';
+            const project='prj_24FvbyWw7CAEbiug1Ec18p51z7WJ';
+            const root='https://api.vercel.com/v9/projects/'+project;
+            const headers={Authorization:'Bearer '+process.env.VERCEL_TOKEN,Accept:'application/json','Content-Type':'application/json'};
+            const request=async(url,options={})=>{
+              const r=await fetch(url,{...options,headers,signal:AbortSignal.timeout(16000)});
+              if(!r.ok)throw new Error('Fallback Vercel API rejected request HTTP '+r.status);
+              return r.json();
+            };
+            const query='?teamId='+team;
+            const p=await request(root+query);
+            if(p.id!==project||p.accountId!==team||p.name!=='orbitfs-dev-panel-fallback'){
+              throw new Error('Vercel project/team identity mismatch — no changes made');
+            }
+            const variables=await request(root+'/env'+query);
+            const rows=(variables.envs||[]).filter(v=>v.key==='ORBITFS_FALLBACK_GITHUB_TOKEN'&&Array.isArray(v.target)&&v.target.includes('production'));
+            if(rows.length!==1||rows[0].type!=='sensitive')throw new Error('Expected exactly one Fallback sensitive production environment variable');
+            await request(root+'/env/'+encodeURIComponent(rows[0].id)+query,{
+              method:'PATCH',
+              body:JSON.stringify({value:process.env.FALLBACK_GITHUB_TOKEN,type:'sensitive',target:['production']})
+            });
+            console.log('Updated Fallback Dev Panel production credential; no Main project, customer secret or GitHub repository modified');
+            console.log('Redeploy orbitfs-dev-panel-fallback to load the replacement credential');
+          })().catch(e=>{console.error(e.message);process.exitCode=1;});
+          NODE
