@@ -1827,6 +1827,13 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
    .sort((a:any,b:any)=>new Date(b.createdAt||b.publishedAt||0).getTime()-new Date(a.createdAt||a.publishedAt||0).getTime())[0]||null
  ]));
  const allComponentsReady=MASTER_DATABASE_COMPONENTS.every(component=>Boolean((ready as any)[component]));
+ const registeredComponents=MASTER_DATABASE_COMPONENTS.filter(component=>Boolean((current as any)[component]||(candidates as any[]).some((row:any)=>row.component===component)));
+ const registeredSources=[...new Set(MASTER_DATABASE_COMPONENTS.flatMap(component=>{
+  const rows=packages.filter((row:any)=>row.component===component&&["candidate","current"].includes(String(row.status).toLowerCase()));
+  return rows.map((row:any)=>String(row.sourceCommit||"")).filter(Boolean);
+ }))];
+ const olderSourceCandidates=registeredComponents.length===MASTER_DATABASE_COMPONENTS.length&&!allComponentsReady&&
+  registeredSources.length===1&&registeredSources[0]!==headSha;
  const hasManualValidation=buildRuns.some((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&run.conclusion==="success");
  const deploymentEventsResult=await authClient().from("orbitfs_deployment_events").select("id,installation_id,event_type,status,message,detail,created_at").order("created_at",{ascending:false}).limit(80);
  const activity=(Array.isArray(deploymentEventsResult?.data)?deploymentEventsResult.data:[])
@@ -1852,7 +1859,15 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   current,
   candidates,
   ready,
-  manualSync:{upToDate:allComponentsReady,canRun:!allComponentsReady&&hasManualValidation,reason:allComponentsReady?"All current-source database packages are already registered.":!hasManualValidation?"No successful manually validated package set exists for this source commit. Registration would fail; run the separate test validation first.":null},
+  manualSync:{
+   upToDate:allComponentsReady,
+   canRun:!allComponentsReady&&hasManualValidation,
+   olderSourceCandidates,
+   registeredSourceCommit:olderSourceCandidates?registeredSources[0]:null,
+   reason:allComponentsReady?"All current-source database packages are already registered.":olderSourceCandidates?
+    "All five components have registered candidates from "+registeredSources[0].slice(0,8)+", but central source is now "+headSha.slice(0,8)+". Source validation/release compatibility must be reconciled before another sync. No job will be queued.":
+    !hasManualValidation?"No successful manually validated package set exists for this source commit. Registration would fail; run the separate test validation first.":null
+  },
   activity,
   automation:{
    releaseIntegration:"automatic",
