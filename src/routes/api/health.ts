@@ -18,7 +18,7 @@ export const Route=createFileRoute("/api/health")({
     try{
      const base=String(process.env.LICENSE_MASTER_URL||"").trim();
      const api=new URL(base);
-     if(api.protocol!=="https:"||api.hostname!=="lm.incendiarynetworks.cc"||api.pathname.replace(/\\/+$/,"")!=="/api/v1"||api.username||api.password||api.search||api.hash){
+     if(api.protocol!=="https:"||api.hostname!=="lm.incendiarynetworks.cc"||api.pathname!=="/api/v1"||api.username||api.password||api.search||api.hash){
       throw new Error("Fallback API origin is not configured");
      }
      const token=String(process.env.LICENSE_MASTER_API_TOKEN||"").trim();
