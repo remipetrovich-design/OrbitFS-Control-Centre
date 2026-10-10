@@ -222,9 +222,9 @@ export function VaultWorkspace({session}:{session:any}){
   const groupedEntries=groupVaultItems(filtered,row=>row);
   const needingReview=records.filter(row=>row.needsReview||!row.destinationSystem||!row.usedIn?.length);
 
-  if(phase!=="open")return <section className="space-y-4">
+  if(phase!=="open")return <section className="min-w-0 w-full max-w-full space-y-4 overflow-x-hidden">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
-    <div className="orbit-panel p-4"><div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Vercel Production connections</h2><p>Main and Fallback account sync is available after you unlock the Vault. No Vercel variables change until you review and approve them.</p></div></div></div>
+    <div className="orbit-panel min-w-0 max-w-full p-4"><div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Vercel Production connections</h2><p>Main and Fallback account sync is available after you unlock the Vault. No Vercel variables change until you review and approve them.</p></div></div></div>
     <div className="mx-auto max-w-lg orbit-panel p-5">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Lock size={15}/></span><div><h2>{phase==="setup"?"Create Vault":"Unlock Vault"}</h2><p>{phase==="setup"?"Create a numeric PIN of at least 6 digits to encrypt this Vault.":"Your Dev Panel session is active. Unlock the encrypted Vault separately."}</p></div></div>
       {error&&<div className="mt-4 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
@@ -274,7 +274,7 @@ export function VaultWorkspace({session}:{session:any}){
     </section>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
         <label className="block text-xs font-medium">Service<select className="control mt-1" value={draft.service} onChange={e=>setDraft({...draft,service:e.target.value})}>{SERVICES.map(x=><option key={x}>{x}</option>)}</select></label>
         <label className="block text-xs font-medium">System<select className="control mt-1" value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}>{SYSTEMS.map(x=><option key={x}>{x}</option>)}</select></label>
         {draft.service==="Other"&&<label className="block text-xs font-medium">Other service<input className="control mt-1" value={draft.customService} onChange={e=>setDraft({...draft,customService:e.target.value})}/></label>}
@@ -282,9 +282,9 @@ export function VaultWorkspace({session}:{session:any}){
         <label className="block text-xs font-medium">Key name · exact<input className="control mt-1 font-mono" autoComplete="off" value={draft.keyName} onChange={e=>setDraft({...draft,keyName:e.target.value})} placeholder="e.g. BILLING_API_TOKEN"/></label>
         <label className="block text-xs font-medium">Key value<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide value":"Show value"}</button></label>
         <label className="block text-xs font-medium md:col-span-2">What this key is for<input className="control mt-1" value={draft.purpose} onChange={e=>setDraft({...draft,purpose:e.target.value})} placeholder="e.g. Billing API access to License Manager"/></label>
-        <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
-        <label className="block text-xs font-medium">Destination system · exact Vercel project or GitHub repository
-          <select aria-label="Destination repository or Vercel project" className="control mt-1 font-mono" value={customDestination?"__custom__":draft.destinationSystem||""} onChange={e=>{const value=e.target.value;setCustomDestination(value==="__custom__");setDraft({...draft,destinationSystem:value==="__custom__"?"":value})}}>
+        <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex flex-wrap gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
+        <label className="block min-w-0 max-w-full text-xs font-medium">Destination system · exact Vercel project or GitHub repository
+          <select aria-label="Destination repository or Vercel project" className="control mt-1 block w-full min-w-0 max-w-full font-mono" value={customDestination?"__custom__":draft.destinationSystem||""} onChange={e=>{const value=e.target.value;setCustomDestination(value==="__custom__");setDraft({...draft,destinationSystem:value==="__custom__"?"":value})}}>
             <option value="" disabled>Choose a destination</option>
             {destinationsFor(draft.system,draft.service,draft.usedIn).map(item=><option key={item.mode+"-"+item.value} value={item.value}>{item.mode==="main"?"Main":"Fallback"} · {item.value}</option>)}
             <option value="__custom__">Custom destination…</option>
