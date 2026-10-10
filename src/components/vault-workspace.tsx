@@ -254,7 +254,12 @@ export function VaultWorkspace({session}:{session:any}){
   </section>;
 
   return <section className="space-y-4">
-    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions flex flex-wrap gap-2"><button className="button-secondary" type="button" onClick={()=>void downloadEncryptedBackup()}><Download size={14}/> Backup encrypted Vault</button><button className="button-secondary" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" type="button" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-2" aria-label="Vault encrypted backup">
+      <h2 className="text-sm font-semibold">Backup your current Vault</h2>
+      <p className="text-xs text-muted-foreground">Download the latest saved encrypted entries before redesigning. Your saved keys are not changed.</p>
+      <button type="button" className="button-primary flex w-full items-center justify-center gap-2 sm:w-auto" onClick={()=>void downloadEncryptedBackup()}><Download size={16}/> Download encrypted Vault backup</button>
+    </section>
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
     <div className="orbit-panel p-4 space-y-2">
