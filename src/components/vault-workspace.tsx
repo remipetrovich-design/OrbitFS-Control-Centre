@@ -48,6 +48,7 @@ export function VaultWorkspace({session}:{session:any}){
   const [importMode,setImportMode]=useState<"skip"|"override"|"replace-all">("skip");
   const [replaceApproved,setReplaceApproved]=useState(false);
   const [editing,setEditing]=useState<VaultRecord|null>(null);
+  const [customDestination,setCustomDestination]=useState(false);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
   const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
   const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
@@ -101,7 +102,7 @@ export function VaultWorkspace({session}:{session:any}){
       if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
       const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:draft.usedIn,destinationSystem:draft.destinationSystem.trim(),needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
-      await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setNotice(editing?"Vault entry updated.":"Vault entry saved.");
+      await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setCustomDestination(false);setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
     finally{setBusy(false)}
   }
@@ -204,6 +205,7 @@ export function VaultWorkspace({session}:{session:any}){
 
   function edit(row:VaultRecord){
     const normalized=normalizeVaultRecord(row);
+    setCustomDestination(Boolean(normalized.destinationSystem) && !destinationsFor(normalized.systems[0]||"Other",normalized.service,normalized.usedIn||[]).some(item=>item.value===normalized.destinationSystem));
     setEditing(row);setDraft({
       system:normalized.systems[0]||"Other",otherSystem:normalized.otherSystem||"",
       service:normalized.service,customService:normalized.customService||"",
@@ -282,17 +284,18 @@ export function VaultWorkspace({session}:{session:any}){
         <label className="block text-xs font-medium md:col-span-2">What this key is for<input className="control mt-1" value={draft.purpose} onChange={e=>setDraft({...draft,purpose:e.target.value})} placeholder="e.g. Billing API access to License Manager"/></label>
         <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
         <label className="block text-xs font-medium">Destination system · exact Vercel project or GitHub repository
-          <select className="control mt-1 font-mono" value={destinationsFor(draft.system,draft.service,draft.usedIn).some(item=>item.value===draft.destinationSystem)?draft.destinationSystem:"__custom__"} onChange={e=>setDraft({...draft,destinationSystem:e.target.value==="__custom__"?"":e.target.value})}>
-            <option value="__custom__">{draft.destinationSystem && !destinationsFor(draft.system,draft.service,draft.usedIn).some(item=>item.value===draft.destinationSystem)?"Custom / existing destination":"Choose a destination or enter custom"}</option>
+          <select aria-label="Destination repository or Vercel project" className="control mt-1 font-mono" value={customDestination?"__custom__":draft.destinationSystem||""} onChange={e=>{const value=e.target.value;setCustomDestination(value==="__custom__");setDraft({...draft,destinationSystem:value==="__custom__"?"":value})}}>
+            <option value="" disabled>Choose a destination</option>
             {destinationsFor(draft.system,draft.service,draft.usedIn).map(item=><option key={item.mode+"-"+item.value} value={item.value}>{item.mode==="main"?"Main":"Fallback"} · {item.value}</option>)}
+            <option value="__custom__">Custom destination…</option>
           </select>
-          {!destinationsFor(draft.system,draft.service,draft.usedIn).some(item=>item.value===draft.destinationSystem)&&
-            <input className="control mt-2 font-mono" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="Custom Vercel project or owner/repository"/>}
+          {customDestination&&
+            <input aria-label="Custom destination" className="control mt-2 font-mono" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="Custom Vercel project or owner/repository"/>}
           <span className="mt-1 block text-xs text-muted-foreground">Options follow the selected system, provider and Main/Fallback checkboxes. Existing custom destinations remain editable.</span>
         </label>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">Key name is the actual environment variable name, not a Vault label. A key may exist more than once if its System, mode or destination differs. Sync never automatically adds/removes a prefix.</p>
-      <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft())}}><X size={14}/> Cancel</button>}</div>
+      <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
     <section className="orbit-panel p-4 space-y-3">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
