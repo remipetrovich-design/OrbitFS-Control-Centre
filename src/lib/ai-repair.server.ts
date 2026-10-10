@@ -27,12 +27,12 @@ async function active(){
 export const getAiRepairOverview=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
  const selection=await active();
- const statuses=await Promise.allSettled((["base","engine"] as const).map(async kind=>{
-  const repo=source(kind,selection.profile);
+ const targets=[{kind:"base" as const,repo:selection.baseRepo},{kind:"engine" as const,repo:selection.engineRepo},{kind:"base" as const,repo:githubProfileDefinitions()[selection.profile].devPanel.repo}];
+ const statuses=await Promise.allSettled(targets.map(async ({kind,repo})=>{
   const result=await(await github(repo,"/actions/runs?status=failure&per_page=15",selection.profile)).json();
   return {kind,repo,runs:(result.workflow_runs||[]).map((x:any)=>({id:x.id,repo,kind,profile:selection.profile,sha:x.head_sha,branch:x.head_branch,name:x.name,url:x.html_url,createdAt:x.created_at,conclusion:x.conclusion}))};
  }));
- const groups=statuses.map((s,i)=>s.status==="fulfilled"?s.value:{kind:i===0?"base":"engine",repo:source(i===0?"base":"engine",selection.profile),runs:[],error:String((s as PromiseRejectedResult).reason?.message||"GitHub unavailable")});
+ const groups=statuses.map((s,i)=>s.status==="fulfilled"?s.value:{kind:i===0?"base":"engine",repo:targets[i].repo,runs:[],error:String((s as PromiseRejectedResult).reason?.message||"GitHub unavailable")});
  return {selection,groups,checkedAt:new Date().toISOString(),worker:workerConfig()};
 });
 function workerConfig(){
@@ -59,7 +59,7 @@ async function repairService(path:string,method:"GET"|"POST"="GET",payload?:unkn
 export const getAiRepairRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number}})=>{
  requireOwner(data.token);
  const selection=await active();
- const kind=(["base","engine"] as const).find(k=>source(k,selection.profile)===data.repo);
+ const kind=data.repo===githubProfileDefinitions()[selection.profile].devPanel.repo?"base":(["base","engine"] as const).find(k=>source(k,selection.profile)===data.repo);
  if(!kind)throw Error("Run does not belong to current active profile");
  const id=safeId(data.runId);
  const [run,jobs]=await Promise.all([
@@ -71,7 +71,7 @@ export const getAiRepairRun=createServerFn({method:"POST"}).handler(async({data}
 export const getAiRepairJobLog=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;jobId:number}})=>{
  requireOwner(data.token);
  const selection=await active();
- if(![selection.baseRepo,selection.engineRepo].includes(data.repo))throw Error("Repository is not in the active profile");
+ if(![selection.baseRepo,selection.engineRepo,githubProfileDefinitions()[selection.profile].devPanel.repo].includes(data.repo))throw Error("Repository is not in the active profile");
  const response=await github(data.repo,"/actions/jobs/"+safeId(data.jobId)+"/logs",selection.profile,"application/vnd.github+json");
  const raw=await response.text();
  return {log:raw.slice(-32000).replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]")};
