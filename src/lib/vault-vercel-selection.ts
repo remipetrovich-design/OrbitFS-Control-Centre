@@ -1,5 +1,5 @@
 import type { VaultRecord } from "./vault-crypto";
-import { allowedForVercelProject, systemForProject, MAIN_VERCEL_INVENTORY, KEY_PATTERN, type VaultMode } from "./vault-schema.ts";
+import { allowedForVercelProject, vaultDestinations, systemForProject, MAIN_VERCEL_INVENTORY, KEY_PATTERN, type VaultMode } from "./vault-schema.ts";
 
 export type VercelVaultEntryStatus = "ready" | "attach" | "value" | "protected" | "invalid";
 export type VercelVaultEntryAssessment = {status:VercelVaultEntryStatus;reason:string};
@@ -26,11 +26,11 @@ export function attachVercelVaultEntry(
   if(!project.trim())throw new Error("Choose the exact Vercel project first.");
   if(!records.some(row=>row.id===source.id))throw new Error("This Vault source is no longer available. Reload the Vault.");
   if(records.some(row=>row.keyName===source.keyName && row.service==="Vercel" &&
-     row.destinationSystem?.toLowerCase()===project.toLowerCase() && row.usedIn?.includes(account)))
+     vaultDestinations(row).some(x=>x.toLowerCase()===project.toLowerCase())))
      throw new Error("This key is already attached to the selected project. Edit its existing Vault value.");
   const linked:VaultRecord={
     ...source,id,systems:[systemForProject(project)],otherSystem:"",
-    service:"Vercel",customService:"",destinationSystem:project,usedIn:[account],needsReview:false,
+    service:"Vercel",customService:"",destinationSystem:project,destinationSystems:[project],usedIn:[account],needsReview:false,
     vercelTargets:[],githubTargets:undefined,
   };
   return [linked,...records];
@@ -50,7 +50,7 @@ export function addBlankVercelVaultEntry(records:VaultRecord[],keyName:string,pr
     throw new Error("Invalid or protected environment variable name.");
   if(!project)throw new Error("Choose a Vercel project first.");
   if(records.some(row=>row.keyName===keyName && row.service==="Vercel" &&
-    row.destinationSystem?.toLowerCase()===project.toLowerCase()&&row.usedIn?.includes(account)))
+    vaultDestinations(row).some(x=>x.toLowerCase()===project.toLowerCase())))
     throw new Error("This key is already saved for the selected project.");
   const record:VaultRecord={id,systems:[systemForProject(project)],otherSystem:"",service:"Vercel",
     customService:"",keyName,secret:"",usedIn:[account],destinationSystem:project,needsReview:false};
