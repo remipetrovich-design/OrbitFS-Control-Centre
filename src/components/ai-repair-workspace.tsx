@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState,type ReactNode} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,FileCode2,Github,Loader2,RefreshCw,Search,ShieldCheck,Terminal,Wrench, Zap} from "lucide-react";
-import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal} from "@/lib/ai-repair.server";
+import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation} from "@/lib/ai-repair.server";
 
 type Section="overview"|"incidents"|"workspace"|"history"|"recovery"|"settings";
 const SECTIONS:[Section,string][]=[["overview","Overview"],["incidents","Incidents"],["workspace","Repair workspace"],["history","Job history"],["recovery","Release recovery"],["settings","Settings"]];
@@ -53,6 +53,12 @@ export function AiRepairWorkspace({session}:{session:any}){
    }
   }catch(e:any){setError(e.message||"Unable to inspect job")}finally{setBusy("")}
  }
+ async function startChecks(){
+  if(!selected?.sha||!selected?.repo)return;
+  if(!window.confirm("Run read-only GitHub Actions checks for this exact source commit? No repair is applied."))return;
+  setBusy("source-validation");setError("");
+  try{const r=await dispatchAiSourceValidation({data:{token,repo:selected.repo,sha:selected.sha}});setNotice("GitHub Actions source validation dispatched.");window.open(r.workerUrl,"_blank","noopener,noreferrer")}catch(e:any){setError(e.message||"Cannot dispatch worker")}finally{setBusy("")}
+ }
  async function getLog(jobId:number){
   if(!selected)return;setBusy("logs");setError("");
   try{setLog((await getAiRepairJobLog({data:{token,repo:selected.repo,jobId}})).log||"")}catch(e:any){setError(e.message||"Could not retrieve logs")}finally{setBusy("")}
@@ -101,7 +107,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   </>}
   {section==="workspace"&&<div className="space-y-3">
    {!selected?<Card title="Choose a failed job"><p className="text-sm text-muted-foreground">Open an incident from Overview or Incidents to inspect its errors and source.</p><button className="button-secondary" onClick={()=>setSection("incidents")}>Open incidents</button></Card>:<>
-    <Card title="Source and failure identity"><div className="flex flex-wrap gap-2"><Pill label={selected.profile||"Profile unknown"}/><Pill label={selected.kind||"System"}/><Pill label={selected.classification||"Failure"}/></div><p className="break-all text-xs">{selected.repo}</p><p className="text-xs text-muted-foreground">Commit: {selected.sha} · Run #{selected.runId}</p>{selected.runUrl||selected.url?<a className="inline-flex items-center gap-1 text-xs underline" href={selected.runUrl||selected.url} target="_blank" rel="noreferrer">View GitHub workflow <ExternalLink size={12}/></a>:null}</Card>
+    <Card title="Source and failure identity"><div className="flex flex-wrap gap-2"><Pill label={selected.profile||"Profile unknown"}/><Pill label={selected.kind||"System"}/><Pill label={selected.classification||"Failure"}/></div><p className="break-all text-xs">{selected.repo}</p><p className="text-xs text-muted-foreground">Commit: {selected.sha} · Run #{selected.runId}</p>{selected.runUrl||selected.url?<a className="inline-flex items-center gap-1 text-xs underline" href={selected.runUrl||selected.url} target="_blank" rel="noreferrer">View GitHub workflow <ExternalLink size={12}/></a>:null}<div><button className="button-secondary inline-flex items-center gap-2" disabled={Boolean(busy)||!selected.sha||!([overview?.selection?.baseRepo,overview?.selection?.engineRepo].includes(selected.repo))} onClick={()=>void startChecks()}><Terminal size={13}/> Run GitHub source checks</button></div></Card>
     {detail?.jobs?.length>0&&<Card title="Failed jobs">{detail.jobs.filter((j:any)=>j.conclusion==="failure").map((j:any)=><div key={j.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3"><div><b className="text-sm">{j.name}</b><p className="text-xs text-muted-foreground">{(j.failedSteps||[]).join(", ")||"Failed"}</p></div><button className="button-secondary" disabled={Boolean(busy)} onClick={()=>void getLog(j.id)}>Load error log</button></div>)}</Card>}
     <Card title="Error console"><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-[11px]">{log||"Select a failed job to fetch its error log, or open a stored incident."}</pre></Card>
     {incidentDetail&&<Card title="Local diagnosis"><div className="flex flex-wrap gap-2"><Pill label={incidentDetail.diagnosis?.classification||"Unknown"}/><Pill label={"Confidence: "+(incidentDetail.diagnosis?.confidence||"low")}/>{(incidentDetail.diagnosis?.components||[]).map((x:string)=><Pill key={x} label={x}/>)}</div><p className="text-sm">{incidentDetail.diagnosis?.recommendation}</p><div className="flex flex-wrap gap-2"><Copy text={incidentDetail.copyForAI||""}/><button className="button-secondary" disabled={Boolean(busy)} onClick={()=>void loadSource()}><FileCode2 size={13}/> Fetch source context</button><button className="button-primary" disabled={!available||Boolean(busy)} onClick={()=>void diagnose()}><Zap size={13}/> Request AI diagnosis</button></div>{!available&&<p className="text-xs text-muted-foreground">AI requires the Repair Centre backend. No request is sent until connected and confirmed.</p>}</Card>}
