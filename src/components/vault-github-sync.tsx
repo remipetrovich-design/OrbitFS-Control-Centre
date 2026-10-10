@@ -137,7 +137,7 @@ export function VaultGithubSync({session,records,onPersist}:{
         const previous=(record.githubTargets||[]).filter(t=>!(t.account===reviewedAccount &&
           t.repo===reviewedRepo.fullName && t.scope===reviewedScope && t.kind===reviewedKind && t.keyName===entry.key));
         return {...record,githubTargets:[...previous,{account:reviewedAccount,repo:reviewedRepo.fullName,
-          scope:reviewedScope,kind:reviewedKind,keyName:entry.key}]};
+          scope:reviewedScope,kind:reviewedKind,keyName:entry.key}],syncReceipts:[...(record.syncReceipts||[]).filter(receipt=>!(receipt.provider==="GitHub"&&receipt.destination===reviewedRepo.fullName&&receipt.keyName===entry.key&&receipt.scope===reviewedScope&&receipt.kind===reviewedKind)),{provider:"GitHub" as const,destination:reviewedRepo.fullName,account:reviewedAccount,keyName:entry.key,scope:reviewedScope,kind:reviewedKind,at:new Date().toISOString()}]};
       });
       try{await onPersist(next)}catch{
         throw new Error("GitHub accepted "+applied+" entries, but saving Vault destination labels failed. Inspect GitHub before retrying.");
