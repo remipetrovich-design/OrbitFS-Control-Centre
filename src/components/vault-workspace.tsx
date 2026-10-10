@@ -50,8 +50,8 @@ export function VaultWorkspace({session}:{session:any}){
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [customDestination,setCustomDestination]=useState(false);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
-  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[],destinationSystems:[] as string[]});
-  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
+  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
+  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
 
   useEffect(()=>{void loadEnvelope()},[session?.token]);
 
@@ -162,7 +162,8 @@ export function VaultWorkspace({session}:{session:any}){
           otherSystem:"",service:String(item.service||"Other"),customService:"",
           keyName:rawName,secret:rawSecret,purpose:String(item.purpose||""),valueSource:String(item.valueSource||""),
           usedIn:modern?(Array.isArray(item.usedIn)?item.usedIn:[]):undefined,
-          destinationSystem:modern?String(item.destinationSystem||""):""
+          destinationSystem:modern?String(item.destinationSystem||""):"",
+          destinationSystems:modern&&Array.isArray(item.destinationSystems)?item.destinationSystems.map(String):undefined
         };
         return normalizeVaultRecord(record);
       });
