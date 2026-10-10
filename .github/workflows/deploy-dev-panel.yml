@@ -134,6 +134,16 @@ jobs:
           if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
           NODE
 
+      - name: Verify GitHub Vault crypto dependency packaged
+        if: steps.profile.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! find .vercel/output/functions -type f -path '*/node_modules/libsodium-wrappers/package.json' -print -quit | grep -q .; then
+            echo "::error::libsodium-wrappers is missing from the Vercel server function. Refusing to deploy broken GitHub Vault sync."
+            exit 1
+          fi
+
       - name: Deploy production
         if: steps.profile.outputs.deploy == 'true'
         run: vercel deploy --prebuilt --archive=tgz --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
