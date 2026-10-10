@@ -5,7 +5,7 @@ import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { VaultGithubSync } from "@/components/vault-github-sync";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
 import { VaultSetupGuide } from "@/components/vault-setup-guide";
-import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, type VaultMode } from "@/lib/vault-schema";
+import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, vaultDestinations, type VaultMode } from "@/lib/vault-schema";
 import { groupVaultItems } from "@/lib/vault-grouping";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 import { preserveVaultConnections, isVaultConnection, bestVaultConnection, usableConnectionValue } from "@/lib/vault-connections";
@@ -25,8 +25,8 @@ const VAULT_DESTINATIONS = [
   {mode:"fallback",system:"Billing",service:"Vercel",value:"orbitfs-billing-fallback"},
   {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
 ] as const;
-const destinationsFor = (system:string,service:string,modes:VaultMode[]) =>
-  VAULT_DESTINATIONS.filter(item=>item.service===service && modes.includes(item.mode) && (system==="Other" || item.system===system));
+const destinationsFor = (_system:string,service:string,_modes:VaultMode[]) =>
+  VAULT_DESTINATIONS.filter(item=>item.service===service);
 
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
 const SERVICES=[...VAULT_SERVICES];
@@ -50,7 +50,7 @@ export function VaultWorkspace({session}:{session:any}){
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [customDestination,setCustomDestination]=useState(false);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
-  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
+  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[],destinationSystems:[] as string[]});
   const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
 
   useEffect(()=>{void loadEnvelope()},[session?.token]);
@@ -97,10 +97,10 @@ export function VaultWorkspace({session}:{session:any}){
     try{
       const system=draft.system.trim(),service=draft.service.trim(),keyName=draft.keyName.trim();
       if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyName))throw new Error("Use the exact environment key name (letters, numbers and underscores). No guessed prefixes.");
-      if(!draft.destinationSystem.trim())throw new Error("Choose the exact destination project or repository before saving.");
-      if(!draft.usedIn.length)throw new Error("Select Main and/or Fallback.");
+      if(!draft.destinationSystems.length)throw new Error("Choose at least one exact destination project or repository before saving.");
+      // Explicit destination selection controls targeting; usedIn is a display label only.
       if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:draft.usedIn,destinationSystem:draft.destinationSystem.trim(),needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:Array.from(new Set(draft.destinationSystems.map(value=>value.startsWith("lucaskerim123/")?"main":value.startsWith("remipetrovich-design/")?"fallback":value.includes("fallback")?"fallback":"main"))) as VaultMode[],destinationSystem:draft.destinationSystems[0]||"",destinationSystems:draft.destinationSystems,needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setCustomDestination(false);setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
@@ -205,22 +205,22 @@ export function VaultWorkspace({session}:{session:any}){
 
   function edit(row:VaultRecord){
     const normalized=normalizeVaultRecord(row);
-    setCustomDestination(Boolean(normalized.destinationSystem) && !destinationsFor(normalized.systems[0]||"Other",normalized.service,normalized.usedIn||[]).some(item=>item.value===normalized.destinationSystem));
+    setCustomDestination(false);
     setEditing(row);setDraft({
       system:normalized.systems[0]||"Other",otherSystem:normalized.otherSystem||"",
       service:normalized.service,customService:normalized.customService||"",
       keyName:normalized.keyName,secret:normalized.secret,purpose:normalized.purpose||"",
-      usedIn:normalized.usedIn||[],destinationSystem:normalized.destinationSystem||""
+      usedIn:normalized.usedIn||[],destinationSystem:normalized.destinationSystem||"",destinationSystems:vaultDestinations(normalized)
     });
     requestAnimationFrame(()=>document.getElementById("vault-entry-editor")?.scrollIntoView({behavior:"smooth",block:"start"}));
   }
 
   const filtered=useMemo(()=>{
     const q=query.trim().toLowerCase();
-    return records.filter(row=>!q||[row.systems[0],row.service,row.keyName,row.destinationSystem,...(row.usedIn||[])].some(v=>String(v||"").toLowerCase().includes(q)));
+    return records.filter(row=>!q||[row.systems[0],row.service,row.keyName,...vaultDestinations(row),...(row.usedIn||[])].some(v=>String(v||"").toLowerCase().includes(q)));
   },[records,query]);
   const groupedEntries=groupVaultItems(filtered,row=>row);
-  const needingReview=records.filter(row=>row.needsReview||!row.destinationSystem||!row.usedIn?.length);
+  const needingReview=records.filter(row=>row.needsReview||!vaultDestinations(row).length);
 
   if(phase!=="open")return <section className="min-w-0 w-full max-w-full space-y-4 overflow-x-hidden">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
@@ -283,16 +283,25 @@ export function VaultWorkspace({session}:{session:any}){
         <label className="block text-xs font-medium">Key value<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide value":"Show value"}</button></label>
         <label className="block text-xs font-medium md:col-span-2">What this key is for<input className="control mt-1" value={draft.purpose} onChange={e=>setDraft({...draft,purpose:e.target.value})} placeholder="e.g. Billing API access to License Manager"/></label>
         <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex flex-wrap gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
-        <label className="block min-w-0 max-w-full text-xs font-medium">Destination system · exact Vercel project or GitHub repository
-          <select aria-label="Destination repository or Vercel project" className="control mt-1 block w-full min-w-0 max-w-full font-mono" value={customDestination?"__custom__":draft.destinationSystem||""} onChange={e=>{const value=e.target.value;setCustomDestination(value==="__custom__");setDraft({...draft,destinationSystem:value==="__custom__"?"":value})}}>
-            <option value="" disabled>Choose a destination</option>
-            {destinationsFor(draft.system,draft.service,draft.usedIn).map(item=><option key={item.mode+"-"+item.value} value={item.value}>{item.mode==="main"?"Main":"Fallback"} · {item.value}</option>)}
-            <option value="__custom__">Custom destination…</option>
-          </select>
-          {customDestination&&
-            <input aria-label="Custom destination" className="control mt-2 font-mono" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="Custom Vercel project or owner/repository"/>}
-          <span className="mt-1 block text-xs text-muted-foreground">Options follow the selected system, provider and Main/Fallback checkboxes. Existing custom destinations remain editable.</span>
-        </label>
+        <fieldset className="min-w-0 max-w-full text-xs">
+          <legend className="font-medium">Destinations · select every project or repository that needs this variable</legend>
+          <div className="mt-2 max-h-52 space-y-2 overflow-y-auto rounded border p-3">
+            {(["main","fallback"] as VaultMode[]).map(mode=><div key={mode} className="space-y-1">
+              <p className="font-semibold">{mode==="main"?"Main":"Fallback"}</p>
+              {destinationsFor(draft.system,draft.service,draft.usedIn).filter(item=>item.mode===mode).map(item=><label key={item.value} className="flex min-w-0 items-start gap-2 py-1">
+                <input type="checkbox" className="mt-0.5 shrink-0" checked={draft.destinationSystems.includes(item.value)} onChange={e=>setDraft({...draft,destinationSystems:e.target.checked?[...draft.destinationSystems,item.value]:draft.destinationSystems.filter(value=>value!==item.value)})}/>
+                <span className="min-w-0 break-all">{item.value}</span>
+              </label>)}
+            </div>)}
+          </div>
+          <label className="mt-3 flex items-center gap-2"><input type="checkbox" checked={customDestination} onChange={e=>setCustomDestination(e.target.checked)}/> Add another custom destination</label>
+          {customDestination&&<div className="mt-2 flex min-w-0 flex-wrap gap-2">
+            <input aria-label="Custom destination" className="control min-w-0 flex-1 font-mono" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="Project name or owner/repository"/>
+            <button type="button" className="button-secondary" onClick={()=>{const value=draft.destinationSystem.trim();if(value&&!draft.destinationSystems.includes(value))setDraft({...draft,destinationSystems:[...draft.destinationSystems,value],destinationSystem:""})}}>Add</button>
+          </div>}
+          {draft.destinationSystems.filter(value=>!VAULT_DESTINATIONS.some(item=>item.value===value)).map(value=><label key={value} className="mt-2 flex items-center gap-2 text-xs"><input type="checkbox" checked onChange={()=>setDraft({...draft,destinationSystems:draft.destinationSystems.filter(x=>x!==value)})}/><span className="break-all">{value}</span></label>)}
+          <p className="mt-2 text-muted-foreground">The system category only organises this key. Every checked destination may use it after manual comparison and approval.</p>
+        </fieldset>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">Key name is the actual environment variable name, not a Vault label. A key may exist more than once if its System, mode or destination differs. Sync never automatically adds/removes a prefix.</p>
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
