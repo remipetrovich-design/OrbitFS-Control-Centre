@@ -134,6 +134,25 @@ jobs:
           if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
           NODE
 
+      - name: Package GitHub Vault crypto runtime
+        if: steps.profile.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Nitro cannot trace createRequire(import.meta.url) dependencies in a
+          # prebuilt function. Include the exact CommonJS/WASM packages needed
+          # by github-vault.server, without exposing or changing any secrets.
+          test -d node_modules/libsodium-wrappers
+          test -d node_modules/libsodium
+          bundled=0
+          while IFS= read -r -d '' function_dir; do
+            mkdir -p "$function_dir/node_modules"
+            cp -RL node_modules/libsodium-wrappers "$function_dir/node_modules/"
+            cp -RL node_modules/libsodium "$function_dir/node_modules/"
+            bundled=$((bundled + 1))
+          done < <(find .vercel/output/functions -type d -name '*.func' -print0)
+          test "$bundled" -gt 0
+
       - name: Verify GitHub Vault crypto dependency packaged
         if: steps.profile.outputs.deploy == 'true'
         shell: bash
