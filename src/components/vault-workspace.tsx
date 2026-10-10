@@ -30,6 +30,29 @@ const destinationsFor = (_system:string,service:string,_modes:VaultMode[]) =>
 
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
 const SERVICES=[...VAULT_SERVICES];
+const VAULT_TABS = ["License","Billing","Dev","Base System","Shared Engine","Database","Other"] as const;
+type VaultTab = typeof VAULT_TABS[number];
+const vaultTabLabel=(tab:VaultTab)=>tab==="Base System"?"Base":tab==="Shared Engine"?"Engine":tab;
+function vaultMatchesTab(row:VaultRecord,tab:VaultTab):boolean {
+  const original=row.systems.some(x=>x.toLowerCase()===tab.toLowerCase() || (tab==="Database"&&/database/i.test(x)));
+  const destinations=vaultDestinations(row);
+  const mapped=destinations.some(value=>{
+    const matches=VAULT_DESTINATIONS.some(target=>target.value.toLowerCase()===value.toLowerCase()&&target.system===tab);
+    if(matches)return true;
+    if(tab==="Base System")return /(?:base-system|vercel-base|base-deploy)/i.test(value);
+    if(tab==="Shared Engine")return /(?:engine|updater)/i.test(value);
+    if(tab==="Database")return /(?:database|supabase)/i.test(value);
+    return false;
+  });
+  return original||mapped;
+}
+function vaultMatchesMode(row:VaultRecord,mode:VaultMode):boolean {
+  const selected=vaultDestinations(row);
+  const catalog=VAULT_DESTINATIONS.filter(target=>selected.some(value=>target.value.toLowerCase()===value.toLowerCase()));
+  const explicit=catalog.length>0?catalog.some(target=>target.mode===mode):false;
+  return explicit||(row.usedIn||[]).includes(mode);
+}
+
 
 export function VaultWorkspace({session}:{session:any}){
   const [phase,setPhase]=useState<"loading"|"setup"|"locked"|"open">("loading");
@@ -39,6 +62,9 @@ export function VaultWorkspace({session}:{session:any}){
   const [activePassword,setActivePassword]=useState("");
   const [records,setRecords]=useState<VaultRecord[]>([]);
   const [query,setQuery]=useState("");
+  const [browseMode,setBrowseMode]=useState<Record<"Vercel"|"GitHub",VaultMode>>({Vercel:"main",GitHub:"main"});
+  const [browseTab,setBrowseTab]=useState<Record<"Vercel"|"GitHub",VaultTab>>({Vercel:"License",GitHub:"License"});
+  const [syncProvider,setSyncProvider]=useState<"Vercel"|"GitHub">("Vercel");
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const [busy,setBusy]=useState(false);
@@ -273,26 +299,47 @@ export function VaultWorkspace({session}:{session:any}){
         <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
       </div>}
     </div>
-    <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
-    <section className="orbit-panel overflow-hidden">
-      <div className="border-b p-4"><h2 className="text-sm font-semibold mb-1">Saved keys · by system and account</h2><p className="text-xs text-muted-foreground mb-3">Open a system, then Main or Fallback. Entries used in both accounts appear in both groups. Search expands matching groups.</p><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div className="p-3 space-y-3">
-        {groupedEntries.map(group=><details key={group.system+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||group.system==="Billing"} className="rounded-lg border">
-          <summary className="cursor-pointer flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
-            <span>{group.label}</span><span className="text-xs text-muted-foreground">{group.count} saved keys</span>
-          </summary>
-          <div className="border-t p-3 space-y-2">
-            {group.sections.map(section=><details key={group.system+"-"+section.mode+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||section.mode==="main"} className="rounded-md border">
-              <summary className="cursor-pointer flex justify-between items-center gap-2 px-3 py-2 text-xs font-semibold">
-                <span>{section.label}</span><span className="text-muted-foreground">{section.items.length} keys</span>
-              </summary>
-              <div className="border-t">{section.items.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p>{row.purpose&&<p className="mt-1 text-xs text-muted-foreground">{row.purpose}</p>}<p className="mt-1 text-xs"><strong>Used in:</strong> {(row.usedIn||[]).map(m=>m==="main"?"Main":"Fallback").join(" / ")||"Needs review"} · <strong>Destination:</strong> {row.destinationSystem||"Not assigned"} {row.legacyKeyName&&<span className="block text-amber-500">Legacy key: {row.legacyKeyName} → {row.keyName}</span>}{row.needsReview&&<span className="block text-amber-500">Unverified legacy key/destination · edit before syncing</span>}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?(row.secret||"(blank)"):(row.secret?"••••••••••••":"(blank)")}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}</div>
-            </details>)}
+    {(["Vercel","GitHub"] as const).map(provider=>{
+      const mode=browseMode[provider],tab=browseTab[provider];
+      const current=records.filter(row=>row.service===provider&&vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab)&&
+        (!query.trim()||[row.keyName,row.purpose||"",...vaultDestinations(row)].some(v=>v.toLowerCase().includes(query.trim().toLowerCase()))));
+      return <details key={provider} className="orbit-panel min-w-0 max-w-full overflow-hidden" open={undefined}>
+        <summary className="cursor-pointer px-4 py-4 font-semibold text-sm">{provider} · {records.filter(row=>row.service===provider).length} saved entries</summary>
+        <div className="border-t p-3 sm:p-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={provider+" account mode"}>
+            {(["main","fallback"] as VaultMode[]).map(value=><button type="button" key={value} aria-pressed={mode===value} className={mode===value?"button-primary":"button-secondary"} onClick={()=>setBrowseMode(prev=>({...prev,[provider]:value}))}>{value==="main"?"Main":"Fallback"}</button>)}
           </div>
-        </details>)}
-        {!groupedEntries.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}
-      </div>
-    </section>
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label={provider+" system selector"}>
+            {VAULT_TABS.map(value=><button type="button" key={value} role="tab" aria-selected={tab===value} className={tab===value?"button-primary":"button-secondary"} onClick={()=>setBrowseTab(prev=>({...prev,[provider]:value}))}>{vaultTabLabel(value)}</button>)}
+          </div>
+          <div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input aria-label={provider+" key search"} className="control w-full min-w-0 pl-9" placeholder="Search saved variables and destinations…" value={query} onChange={e=>setQuery(e.target.value)}/></div>
+          <p className="text-xs text-muted-foreground">{current.length} entries · Tabs organise keys; they do not limit where they can be used.</p>
+          <div className="space-y-2">
+            {current.map(row=><article key={row.id} className="min-w-0 rounded-lg border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="break-all font-mono text-xs font-semibold">{row.keyName}</p>
+                  {row.purpose&&<p className="mt-1 break-words text-xs text-muted-foreground">{row.purpose}</p>}
+                  <p className="mt-1 break-all text-xs text-muted-foreground">Targets: {vaultDestinations(row).join(" · ")||"Not assigned"}</p>
+                  {row.needsReview&&<p className="mt-1 text-xs text-amber-500">Review destination before syncing</p>}
+                  <p className="mt-2 break-all font-mono text-xs">{visible.includes(row.id)?row.secret||"(blank)":row.secret?"••••••••••••":"(blank)"}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-1">
+                  <button type="button" className="icon-button" aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} title={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(old=>old.includes(row.id)?old.filter(id=>id!==row.id):[...old,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button>
+                  <button type="button" className="icon-button" title="Copy secret" aria-label="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button>
+                  <button type="button" className="icon-button" title="Edit variable" aria-label="Edit variable" onClick={()=>edit(row)}><Pencil size={14}/></button>
+                  <button type="button" className="icon-button" title="Remove variable" aria-label="Remove variable" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button>
+                </div>
+              </div>
+            </article>)}
+            {!current.length&&<p className="rounded border p-4 text-xs text-muted-foreground">No saved entries match this system and mode. A variable can appear under multiple system tabs when assigned to those destinations.</p>}
+          </div>
+        </div>
+      </details>;
+    })}
+    <details className="orbit-panel min-w-0 max-w-full p-4" open={Boolean(editing)} key={editing?.id||"new-entry"}>
+      <summary className="cursor-pointer text-sm font-semibold">{editing?"Edit saved variable":"Add environment variable"}</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Use the existing encrypted editor. One secret can have multiple destinations in Main and Fallback.</p>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
       <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
@@ -327,11 +374,15 @@ export function VaultWorkspace({session}:{session:any}){
       <p className="mt-2 text-xs text-muted-foreground">Key name is the actual environment variable name, not a Vault label. A key may exist more than once if its System, mode or destination differs. Sync never automatically adds/removes a prefix.</p>
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
-    <section className="orbit-panel p-4 space-y-3">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
+    </details>
+    <details className="orbit-panel min-w-0 max-w-full p-4 space-y-3">
+      <summary className="cursor-pointer text-sm font-semibold">Recovery / Configuration / Setup</summary>
+      <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
+      <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
       <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
       {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace old keys with this JSON (keep GitHub/Vercel account connections)</label></fieldset><p className="text-xs text-muted-foreground">{importMode==="replace-all"?`All existing non-connection Vault entries will be replaced with ${importRows.length} imported entries. Existing GitHub/Vercel account connections are preserved.`:`${importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length} matching entries will be ${importMode==="skip"?"skipped":"overwritten"}.`}</p>{importMode==="replace-all"&&<div className="space-y-2 rounded border p-3"><p className="text-xs">Back up before replacing. GitHub/Vercel connections are preserved, but other keys may be replaced and provider secrets generally cannot be read back.</p><button className="button-secondary" type="button" onClick={downloadEncryptedBackup}><Download size={14}/> Export encrypted old Vault backup</button><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> I approve replacing old non-connection entries. My GitHub and Vercel account connections must remain intact.</label></div>}<div className="flex gap-2"><button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{importMode==="replace-all"?"Replace non-connection keys":"Import entries"}</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
-    </section>
+    </div>
+    </details>
     <details className="orbit-panel p-4" aria-label="Vercel Production sync">
       <summary className="cursor-pointer font-semibold">2 · Vercel — send keys to Production projects (open only when needed)</summary>
       <p className="mt-2 text-xs text-muted-foreground">Use one Vercel account at a time. Main and Fallback have separate projects. Select the relevant service, compare before writing, and skip unrelated keys.</p>
