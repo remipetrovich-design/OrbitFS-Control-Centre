@@ -118,3 +118,40 @@ export const dispatchAiSourceValidation=createServerFn({method:"POST"}).handler(
  if(!response.ok)throw Error("GitHub Actions dispatch failed: HTTP "+response.status);
  return {dispatched:true,workerUrl:"https://github.com/"+workerRepo+"/actions/workflows/validate-source.yml",profile:selection.profile,system:eligible.system,sha:data.sha,publication:"manual-only"};
 });
+
+function explainReleaseFailure(log:string,steps:string[]){
+ const t=[log,...steps].join("\n");
+ const options=[
+  {key:"artifact",rx:/checksum|sha-?256|manifest|artifact (?:missing|invalid)|file count/i,title:"Release package or manifest validation failed",action:"Inspect the generated release manifest, packaged file inventory and SHA-256 values. Rebuild the same release candidate after correcting packaging; do not bypass License Manager validation."},
+  {key:"database",rx:/migration|sqlstate|database schema|customer-schema|db:migrations/i,title:"Database or migration contract failed",action:"Check the exact migration contract and generated schema snapshot. Use forward-only migrations; do not rewrite applied migration history."},
+  {key:"permissions",rx:/401|403|unauthori[sz]ed|forbidden|permission denied|bad credentials/i,title:"Release credentials or permissions failed",action:"Verify the active GitHub profile and configured read/release credentials. Do not copy secrets into logs or disable authentication."},
+  {key:"dependency",rx:/npm err|npm ci|cannot find module|module not found|unable to resolve|package-lock/i,title:"Dependency installation or resolution failed",action:"Check package.json against the exact lockfile and failing imports. Reinstall locked dependencies and run check/build in a validation worker."},
+  {key:"typecheck",rx:/error TS\d+|svelte-check|type error|typescript/i,title:"Source typecheck failed",action:"Open the failing source path and TypeScript diagnostic. Correct the source at the failed commit, then run npm run check and npm run build."},
+  {key:"build",rx:/vite|rollup|build failed|syntaxerror|referenceerror/i,title:"Source build failed",action:"Inspect the failing build step and relevant source files. Validate a minimal correction at the failed commit before retrying the same release."},
+  {key:"upstream",rx:/429|rate.limit|econnreset|etimedout|502|503|eai_again/i,title:"External service or network failure",action:"Check upstream service availability and retry only after confirming the error is transient; preserve release approval gates."}
+ ];
+ const match=options.find(x=>x.rx.test(t));
+ return {category:match?.key||"unknown",title:match?.title||"Failed release needs source-level investigation",suggestion:match?.action||"Inspect the exact failed job output, source commit and release package. Identify the root cause before retrying the same release.",confidence:match?"rule-matched":"unclassified",aiRequests:0};
+}
+function sanitiseRepairLog(value:string){
+ return String(value||"").replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]").replace(/((?:token|password|secret|api[_-]?key)\s*[:=]\s*)[^\s]+/gi,"$1[REDACTED]").slice(-16000);
+}
+export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number;type:"base"|"engine";savedError?:string}})=>{
+ requireOwner(data.token);
+ const selection=await active();
+ const type=requireKind(data.type);
+ const authorisedRepos=type==="base"?[selection.baseRepo,githubProfileDefinitions()[selection.profile].devPanel.repo]:[selection.engineRepo];
+ if(!authorisedRepos.includes(data.repo))throw Error("Release run does not belong to this active profile and release system");
+ const id=safeId(data.runId);
+ const run=await(await github(data.repo,"/actions/runs/"+id,selection.profile)).json();
+ const jobs=await(await github(data.repo,"/actions/runs/"+id+"/jobs?per_page=100",selection.profile)).json();
+ const job=(jobs.jobs||[]).find((x:any)=>x.conclusion==="failure")||null;
+ const failedSteps=(job?.steps||[]).filter((x:any)=>x.conclusion==="failure").map((x:any)=>String(x.name));
+ let log=sanitiseRepairLog(data.savedError||""),logError="";
+ if(job){
+  try{const response=await github(data.repo,"/actions/jobs/"+safeId(job.id)+"/logs",selection.profile);log=sanitiseRepairLog((await response.text()).slice(-80000))||log;}
+  catch(e:any){logError=String(e.message||"Job logs unavailable");}
+ }
+ const solution=explainReleaseFailure(log,failedSteps);
+ return {repo:data.repo,profile:selection.profile,type,runId:Number(id),jobId:job?.id||null,sha:String(run.head_sha||""),runUrl:run.html_url||null,status:run.status,conclusion:run.conclusion,failedSteps,log,logError,solution,ready:run.conclusion==="failure"||run.conclusion==="cancelled",checkedAt:new Date().toISOString()};
+});
