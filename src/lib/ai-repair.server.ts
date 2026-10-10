@@ -100,3 +100,21 @@ export const validateAiRepairProposal=createServerFn({method:"POST"}).handler(as
  if(data.confirm!=="VALIDATE_ISOLATED_REPAIR")throw Error("Explicit validation confirmation required");
  return await repairService("validate","POST",{incidentId:data.incidentId,proposal:data.proposal,confirm:data.confirm});
 });
+
+export const dispatchAiSourceValidation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;sha:string}})=>{
+ requireOwner(data.token);
+ const selection=await active();
+ const eligible=[{system:"base",repo:selection.baseRepo},{system:"engine",repo:selection.engineRepo}].find(item=>item.repo===data.repo);
+ if(!eligible)throw Error("Only the active profile's Base and Engine source commits may be validated");
+ if(!/^[a-f0-9]{40}$/i.test(data.sha))throw Error("Exact commit SHA required");
+ const workerToken=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ if(!workerToken)throw Error("AI_REPAIR_WORKER_GITHUB_TOKEN not configured. Manual source validation is unavailable.");
+ const workerRepo="remipetrovich-design/AI-Repair-Centre";
+ const response=await fetch("https://api.github.com/repos/"+workerRepo+"/actions/workflows/validate-source.yml/dispatches",{
+  method:"POST",headers:{Authorization:"Bearer "+workerToken,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
+  body:JSON.stringify({ref:"main",inputs:{profile:selection.profile==="primary"?"main":"fallback",system:eligible.system,commit_sha:data.sha}}),
+  signal:timeout()
+ });
+ if(!response.ok)throw Error("GitHub Actions dispatch failed: HTTP "+response.status);
+ return {dispatched:true,workerUrl:"https://github.com/"+workerRepo+"/actions/workflows/validate-source.yml",profile:selection.profile,system:eligible.system,sha:data.sha,publication:"manual-only"};
+});
