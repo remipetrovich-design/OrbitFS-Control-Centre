@@ -1,5 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import sodium from "libsodium-wrappers";
+import { createRequire } from "node:module";
+// Keep libsodium in its Node CommonJS loader: bundling its WASM runtime into ESM
+// makes its internal __dirname reference fail on Vercel.
+const sodium: typeof import("libsodium-wrappers") = createRequire(import.meta.url)("libsodium-wrappers");
 import { requireVaultUser } from "@/lib/vault.server";
 import {
   allowedVaultValue, assertReviewedGithubWrite, planGithubKey, targetPath, GITHUB_OWNERS,
