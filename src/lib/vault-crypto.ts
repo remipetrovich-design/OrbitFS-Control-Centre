@@ -19,6 +19,8 @@ export type VaultRecord={
   needsReview?: boolean;
   vercelTargets?: Array<{connection:"main"|"fallback";projectId:string;projectName:string;keyName:string}>;
   githubTargets?: Array<{account:"main"|"fallback";repo:string;scope:"repository"|"production";kind:"secret"|"variable";keyName:string}>;
+  /** Only written following an acknowledged provider write; does not prove app runtime usage. */
+  syncReceipts?: Array<{provider:"Vercel"|"GitHub";destination:string;account:"main"|"fallback";keyName:string;at:string;scope?:string;kind?:string}>;
 };
 
 export type VaultEnvelope={
