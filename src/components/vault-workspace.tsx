@@ -107,10 +107,25 @@ export function VaultWorkspace({session}:{session:any}){
     finally{setBusy(false)}
   }
 
-  function downloadEncryptedBackup(){
-    if(!envelope){setError("Encrypted Vault is unavailable.");return;}
-    const blob=new Blob([JSON.stringify({format:"orbitfs-vault-encrypted-backup-v1",envelope},null,2)+"\n"],{type:"application/json"});
-    const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="orbitfs-vault-encrypted-backup.json";a.click();URL.revokeObjectURL(url);
+  async function downloadEncryptedBackup(){
+    setError("");setNotice("");
+    try {
+      // Fetch the latest persisted ciphertext, not an unsaved UI draft.
+      const current=await getVaultEnvelope({data:{token:session.token}});
+      if(!current.exists||!current.envelope)throw new Error("Encrypted Vault is unavailable.");
+      const latest=current.envelope as VaultEnvelope;
+      const savedRecords=await decryptEnvelope(activePassword,latest);
+      if(!Array.isArray(savedRecords))throw new Error("Vault backup validation failed.");
+      const backup={format:"orbitfs-vault-encrypted-backup-v1",envelope:latest};
+      const blob=new Blob([JSON.stringify(backup,null,2)+"\n"],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement("a");
+      link.href=url;
+      link.download="orbitfs-vault-encrypted-backup-"+new Date().toISOString().slice(0,10)+".json";
+      link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setNotice("Encrypted backup prepared from the latest saved Vault ("+savedRecords.length+" entries). Keep the downloaded file and your Vault PIN safe; no secret values are written in plaintext.");
+    }catch(e:any){setError("Unable to export a verified Vault backup: "+String(e?.message||"unknown error"));}
   }
 
   function downloadTemplate(){
@@ -239,7 +254,7 @@ export function VaultWorkspace({session}:{session:any}){
   </section>;
 
   return <section className="space-y-4">
-    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions flex flex-wrap gap-2"><button className="button-secondary" type="button" onClick={()=>void downloadEncryptedBackup()}><Download size={14}/> Backup encrypted Vault</button><button className="button-secondary" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
     <div className="orbit-panel p-4 space-y-2">
