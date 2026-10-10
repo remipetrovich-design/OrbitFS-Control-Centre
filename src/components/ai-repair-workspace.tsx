@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useMemo,useState} from "react";
+import {useCallback,useEffect,useMemo,useState,type ReactNode} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,FileCode2,Github,Loader2,RefreshCw,Search,ShieldCheck,Terminal,Wrench, Zap} from "lucide-react";
 import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal} from "@/lib/ai-repair.server";
 
@@ -6,7 +6,7 @@ type Section="overview"|"incidents"|"workspace"|"history"|"recovery"|"settings";
 const SECTIONS:[Section,string][]=[["overview","Overview"],["incidents","Incidents"],["workspace","Repair workspace"],["history","Job history"],["recovery","Release recovery"],["settings","Settings"]];
 function date(v?:string){return v?new Date(v).toLocaleString():"—"}
 function Pill({label,ok}:{label:string;ok?:boolean}){return <span className={`orbit-status-pill ${ok===true?"orbit-status-tone-success":ok===false?"orbit-status-tone-warning":"orbit-status-tone-neutral"}`}>{label}</span>}
-function Card({title,children}:{title:string;children:React.ReactNode}){return <section className="rounded-xl border border-border bg-card p-4 space-y-3"><h3 className="text-sm font-semibold">{title}</h3>{children}</section>}
+function Card({title,children}:{title:string;children:ReactNode}){return <section className="rounded-xl border border-border bg-card p-4 space-y-3"><h3 className="text-sm font-semibold">{title}</h3>{children}</section>}
 function Copy({text}:{text:string}){const [done,setDone]=useState(false);return <button className="button-secondary inline-flex items-center gap-2" type="button" disabled={!text} onClick={async()=>{try{await navigator.clipboard.writeText(text);setDone(true);setTimeout(()=>setDone(false),1800)}catch{setDone(false)}}}><Clipboard size={14}/>{done?"Copied":"Copy for ChatGPT"}</button>}
 
 export function AiRepairWorkspace({session}:{session:any}){
@@ -35,7 +35,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   }catch(e:any){setError(e.message||"Failed to load AI Repair Centre")}
   finally{setBusy("")}
  },[token]);
- useEffect(()=>{void load()},[load]);
+ useEffect(()=>{void load();const interval=setInterval(()=>{if(document.visibilityState==="visible")void load()},60000);return ()=>clearInterval(interval)},[load]);
  const runs=useMemo(()=>overview?.groups?.flatMap((g:any)=>g.runs||[])||[],[overview]);
  const rows=useMemo(()=>{
   const combined=[...incidents.map((i:any)=>({...i,kind:i.kind||(i.repo?.toLowerCase().includes("engine")?"engine":"base"),origin:"stored"})),...runs.filter((r:any)=>!incidents.some((i:any)=>i.repo===r.repo&&i.runId===r.id)).map((r:any)=>({...r,runId:r.id,origin:"github",status:"detected"}))];
