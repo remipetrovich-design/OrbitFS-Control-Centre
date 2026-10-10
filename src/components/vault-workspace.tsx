@@ -126,7 +126,7 @@ export function VaultWorkspace({session}:{session:any}){
       if(!draft.destinationSystems.length)throw new Error("Choose at least one exact destination project or repository before saving.");
       // Explicit destination selection controls targeting; usedIn is a display label only.
       if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:Array.from(new Set(draft.destinationSystems.flatMap(value=>VAULT_DESTINATIONS.filter(item=>item.value===value).map(item=>item.mode)).concat(draft.usedIn))) as VaultMode[],destinationSystem:draft.destinationSystems[0]||"",destinationSystems:draft.destinationSystems,needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:Array.from(new Set(draft.destinationSystems.flatMap(value=>VAULT_DESTINATIONS.filter(item=>item.value===value).map(item=>item.mode)).concat(draft.usedIn))) as VaultMode[],destinationSystem:draft.destinationSystems[0]||"",destinationSystems:draft.destinationSystems,needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets,syncReceipts:editing?.keyName===keyName&&editing?.secret===draft.secret?editing?.syncReceipts:[]};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setCustomDestination(false);setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
@@ -320,7 +320,17 @@ export function VaultWorkspace({session}:{session:any}){
                 <div className="min-w-0 flex-1">
                   <p className="break-all font-mono text-xs font-semibold">{row.keyName}</p>
                   {row.purpose&&<p className="mt-1 break-words text-xs text-muted-foreground">{row.purpose}</p>}
-                  <p className="mt-1 break-all text-xs text-muted-foreground">Targets: {vaultDestinations(row).join(" · ")||"Not assigned"}</p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    {vaultDestinations(row).map(destination=>{
+                      const receipt=(row.syncReceipts||[]).filter(item=>item.provider===provider&&item.destination.toLowerCase()===destination.toLowerCase()&&item.keyName===row.keyName).sort((a,b)=>b.at.localeCompare(a.at))[0];
+                      return <p key={destination} className="break-all rounded border px-2 py-1">
+                        <span className="font-medium">{destination}</span> · {receipt?"Sent / accepted":"Assigned · not confirmed sent"}
+                        {receipt&&<span className="block text-muted-foreground">Last sent: {new Date(receipt.at).toLocaleString()} · {receipt.account==="main"?"Main":"Fallback"}{receipt.scope?" · "+receipt.scope:""}{receipt.kind?" · "+receipt.kind:""}</span>}
+                      </p>;
+                    })}
+                    {!vaultDestinations(row).length&&<p className="text-muted-foreground">Not assigned · not sent</p>}
+                    <p className="text-muted-foreground">Assigned means selected for this destination. Sent confirms a recorded provider write; actual application usage is not verified.</p>
+                  </div>
                   {row.needsReview&&<p className="mt-1 text-xs text-amber-500">Review destination before syncing</p>}
                   <p className="mt-2 break-all font-mono text-xs">{visible.includes(row.id)?row.secret||"(blank)":row.secret?"••••••••••••":"(blank)"}</p>
                 </div>
