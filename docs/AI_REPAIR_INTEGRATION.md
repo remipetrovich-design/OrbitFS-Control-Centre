@@ -19,7 +19,7 @@ The workflow is manual-only and is subject to GitHub Actions quotas for private 
 
 ## Full repair backend connection
 
-When a securely hosted repair backend exists, configure `AI_REPAIR_SERVICE_URL` and `AI_REPAIR_SERVICE_TOKEN` as **server-side** Control Centre environment variables. Do not expose them with a `VITE_` prefix. Incident history, local diagnosis, manual OpenRouter proposals and isolated patch validation then use the authenticated repair service. When absent, UI explicitly marks those actions unavailable; it does not simulate repair success.
+When a securely hosted repair backend exists, configure `AI_REPAIR_SERVICE_URL` and `AI_REPAIR_SERVICE_TOKEN` as **server-side** Control Centre environment variables. Do not expose them with a `VITE_` prefix. Incident history, local diagnosis, OpenRouter proposals (automatic for new failures when the repair backend is configured) and isolated patch validation then use the authenticated repair service. When absent, UI explicitly marks those actions unavailable; it does not simulate repair success.
 
 The current AI Repair Centre Node service requires persistent storage and Docker and is not automatically hosted by the Vercel Dev Panel. Further work is required to implement GitHub Actions-based **patch** validation and release recovery.
 
@@ -30,3 +30,9 @@ The AI Repair Centre cannot independently modify Base or Engine repositories, ap
 ## Verification
 
 All changes were committed on the existing `main` branches. The page and API have not yet been verified with a production build, a live Main/Fallback account, or a successful GitHub Actions worker run. GitHub returned no commit status checks for the latest commits.
+
+## Automatic free AI policy
+
+The backend can automatically run **one free-model OpenRouter analysis for each distinct recent failure signature** while the repair service is running, with persisted deduplication across reruns, a five-per-day maximum and a one-minute cooldown. It compares diagnostic class, source path, TypeScript/error code and normalised error text. Similar failures reuse an earlier diagnosis without a new model request. Only source diagnostics are cached for reuse; cross-commit patches are not applied. The operator may disable background calls with `REPAIR_AUTO_AI=false` on the backend. Missing OpenRouter credentials or persistent storage prevents automatic calls. The inline Base/Update **Fix** panel provides zero-cost deterministic advice even when no backend is connected.
+
+This does not automatically run in Vercel simply because the UI is present. A durable repair worker remains a prerequisite for background model calls; don't show the service as connected until verified.
