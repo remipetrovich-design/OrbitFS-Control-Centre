@@ -151,6 +151,29 @@ function Index() {
     if (session) load(session, true);
   }, [channel]);
 
+  // Keep the existing persisted Base/Update attempts fresh while the operator
+  // works on other Control Centre pages. Reconcile immediately on browser return.
+  useEffect(() => {
+    if (!session?.token) return;
+    let stopped = false;
+    let inFlight = false;
+    const check = async () => {
+      if (stopped || inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      try { await load(session, true); } catch {}
+      finally { inFlight = false; }
+    };
+    const onReturn = () => { if (document.visibilityState === "visible") void check(); };
+    const timer = window.setInterval(() => void check(), 90000);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [session?.token, channel]);
+
+
   useEffect(() => {
     if (!run?.id || !runRepo || !session) return;
     const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
