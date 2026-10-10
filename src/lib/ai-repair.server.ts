@@ -37,7 +37,7 @@ export const getAiRepairOverview=createServerFn({method:"POST"}).handler(async({
 });
 function workerConfig(){
  const value=String(process.env.AI_REPAIR_SERVICE_URL||"").trim();
- return {configured:Boolean(value),aiManualOnly:true,publication:"manual",mode:value?"connected-configured":"unconfigured"};
+ return {configured:Boolean(value),automaticAiWhenConfigured:true,publication:"manual",mode:value?"connected-configured":"unconfigured"};
 }
 function repairEndpoint(){
  const raw=String(process.env.AI_REPAIR_SERVICE_URL||"").trim();
