@@ -15,6 +15,11 @@ export default defineConfig({
   nitro: isVercelBuild
     ? {
         preset: "vercel",
+        // github-vault.server uses createRequire for libsodium WASM compatibility.
+        // Explicitly trace its runtime package so the Vercel function includes it.
+        externals: {
+          traceInclude: ["node_modules/libsodium-wrappers/**", "node_modules/libsodium/**"],
+        },
       }
     : true,
 });
