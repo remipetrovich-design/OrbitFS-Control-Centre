@@ -97,11 +97,17 @@ export function exactVerifiedName(row:VaultRecord):string | null {
  // Never invent a destination by stripping prefixes without a verified exact match.
  return null;
 }
+export function vaultDestinations(row:VaultRecord):string[] {
+ const values = Array.isArray(row.destinationSystems) && row.destinationSystems.length
+   ? row.destinationSystems : [row.destinationSystem||""];
+ return Array.from(new Set(values.map(x=>String(x||"").trim()).filter(Boolean)));
+}
 export function normalizeVaultRecord(row:VaultRecord):VaultRecord {
  const system=systemOf(row), service=serviceOf(row), exact=exactVerifiedName(row);
  const modes:VaultMode[]=(row.usedIn||[]).filter((v):v is VaultMode=>v==="main"||v==="fallback");
  const legacyKey=row.keyName;
- const hasSourceDestination=Boolean(row.destinationSystem?.trim());
+ const selectedDestinations=vaultDestinations(row);
+ const hasSourceDestination=selectedDestinations.length>0;
  const inferred=service==="Vercel"?MAIN_VERCEL_INVENTORY.find(x=>x.system===system&&x.name===exact):null;
  return {
    ...row,systems:[system],service,otherSystem:system==="Other"?(row.otherSystem||""):"",
@@ -109,27 +115,25 @@ export function normalizeVaultRecord(row:VaultRecord):VaultRecord {
    // Preserve non-verified names intact; mark them for manual review.
    keyName:exact||legacyKey,
    legacyKeyName:exact&&exact!==legacyKey?legacyKey:row.legacyKeyName,
-   destinationSystem:hasSourceDestination?row.destinationSystem:(row.vercelTargets?.[0]?.projectName||row.githubTargets?.[0]?.repo||inferred?.destinationSystem||""),
+   destinationSystem:hasSourceDestination?selectedDestinations[0]:(row.vercelTargets?.[0]?.projectName||row.githubTargets?.[0]?.repo||inferred?.destinationSystem||""),
+   destinationSystems:hasSourceDestination?selectedDestinations:undefined,
    usedIn:modes.length?modes:Array.from(new Set([...(row.vercelTargets||[]).map(x=>x.connection),...(row.githubTargets||[]).map(x=>x.account),...(inferred?[inferred.usedIn]:[])])) as VaultMode[],
    needsReview:!exact&&!hasSourceDestination&&!row.vercelTargets?.length&&!row.githubTargets?.length
  };
 }
 export function recordIdentity(row:VaultRecord):string {
- return [systemOf(row),serviceOf(row),row.keyName,row.destinationSystem||"",...(row.usedIn||[]).slice().sort()].join("|").toLowerCase();
+ return [systemOf(row),serviceOf(row),row.keyName,vaultDestinations(row).slice().sort().join(","),...(row.usedIn||[]).slice().sort()].join("|").toLowerCase();
 }
 export function allowedForVercelProject(row:VaultRecord,projectName:string,account:VaultMode):boolean {
  if(serviceOf(row)!=="Vercel")return false;
- if(!(row.usedIn||[]).includes(account))return false;
- if(row.destinationSystem&&row.destinationSystem.toLowerCase()!==projectName.toLowerCase())return false;
- if(systemOf(row)!==systemForProject(projectName))return false;
+ if(!vaultDestinations(row).some(target=>target.toLowerCase()===projectName.toLowerCase()))return false;
  // A manually assigned, exact destination is authoritative even when the name
  // is absent from the static Main inventory (e.g. new Fallback-only variables).
  // Never silently strip, add, or infer a prefix.
  if(!KEY_PATTERN.test(row.keyName) || row.keyName.length>256) return false;
  if(/^(?:GITHUB_TOKEN|VERCEL_(?:TOKEN|TEAM_ID))_(?:MAIN|FALLBACK)$/.test(row.keyName))return false;
- return !!row.destinationSystem && !row.needsReview;
+ return vaultDestinations(row).length>0 && !row.needsReview;
 }
 export function allowedForGithubRepo(row:VaultRecord,repo:string,account:VaultMode):boolean {
- return serviceOf(row)==="GitHub"&&(row.usedIn||[]).includes(account)&&
-    row.destinationSystem===repo&&!row.needsReview;
+ return serviceOf(row)==="GitHub"&&vaultDestinations(row).some(target=>target.toLowerCase()===repo.toLowerCase())&&!row.needsReview;
 }
