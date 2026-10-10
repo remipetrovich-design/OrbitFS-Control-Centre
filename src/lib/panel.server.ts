@@ -533,11 +533,11 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
       try{
        const raw=await operationsGithubText("/repos/"+workerRepo+"/actions/jobs/"+Number(job.id)+"/logs");
        const parsed=extractOperationFailure(raw)||fallbackOperationFailure(job,raw);
-       details=String((parsed?.lines||[]).join("\\n")||parsed?.error||"").slice(-9000);
+       details=String((parsed?.lines||[]).join("\n")||parsed?.error||"").slice(-9000);
       }catch{}
       const label="Failed job: "+String(job.name||"unknown")+(steps.length?" | Steps: "+steps.join(", "):"");
-      const value=[label,details].filter(Boolean).join("\\n");
-      if(value)err=value.replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\\s+\\S+/gi,"Bearer [REDACTED]");
+      const value=[label,details].filter(Boolean).join("\n");
+      if(value)err=value.replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]");
      }
     }catch(extractError){console.error("Failed run diagnostic unavailable",draft.id,extractError);}
    }
