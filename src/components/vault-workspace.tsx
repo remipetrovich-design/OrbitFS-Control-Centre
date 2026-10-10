@@ -375,24 +375,25 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
     </details>
+    <details className="orbit-panel min-w-0 max-w-full p-4">
+      <summary className="cursor-pointer text-sm font-semibold">Send variables · Vercel / GitHub</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Choose a provider, inspect the destination and review each proposed change before applying.</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Send variables provider">
+        {(["Vercel","GitHub"] as const).map(provider=><button type="button" key={provider} role="tab" aria-selected={syncProvider===provider} className={syncProvider===provider?"button-primary":"button-secondary"} onClick={()=>setSyncProvider(provider)}>Send to {provider}</button>)}
+      </div>
+      <div className="mt-4">
+        {syncProvider==="Vercel"?<VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/>:<VaultGithubSync session={session} records={records} onPersist={persist}/>}
+      </div>
+    </details>
     <details className="orbit-panel min-w-0 max-w-full p-4 space-y-3">
       <summary className="cursor-pointer text-sm font-semibold">Recovery / Configuration / Setup</summary>
+
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
       <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
       <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
       {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace old keys with this JSON (keep GitHub/Vercel account connections)</label></fieldset><p className="text-xs text-muted-foreground">{importMode==="replace-all"?`All existing non-connection Vault entries will be replaced with ${importRows.length} imported entries. Existing GitHub/Vercel account connections are preserved.`:`${importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length} matching entries will be ${importMode==="skip"?"skipped":"overwritten"}.`}</p>{importMode==="replace-all"&&<div className="space-y-2 rounded border p-3"><p className="text-xs">Back up before replacing. GitHub/Vercel connections are preserved, but other keys may be replaced and provider secrets generally cannot be read back.</p><button className="button-secondary" type="button" onClick={downloadEncryptedBackup}><Download size={14}/> Export encrypted old Vault backup</button><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> I approve replacing old non-connection entries. My GitHub and Vercel account connections must remain intact.</label></div>}<div className="flex gap-2"><button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{importMode==="replace-all"?"Replace non-connection keys":"Import entries"}</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
     </div>
-    </details>
-    <details className="orbit-panel p-4" aria-label="Vercel Production sync">
-      <summary className="cursor-pointer font-semibold">2 · Vercel — send keys to Production projects (open only when needed)</summary>
-      <p className="mt-2 text-xs text-muted-foreground">Use one Vercel account at a time. Main and Fallback have separate projects. Select the relevant service, compare before writing, and skip unrelated keys.</p>
-      <div className="mt-3"><VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/></div>
-    </details>
-    <details className="orbit-panel p-4" aria-label="GitHub Actions sync">
-      <summary className="cursor-pointer font-semibold">3 · GitHub — send release/deployment settings to repositories (open only when needed)</summary>
-      <p className="mt-2 text-xs text-muted-foreground">One GitHub token per account. Select repository secrets for release workflows or Production environment secrets for service deployment workflows. Do not copy the GitHub account connection token into a workflow.</p>
-      <div className="mt-3"><VaultGithubSync session={session} records={records} onPersist={persist}/></div>
-    </details>
+
     <details className="orbit-panel p-4">
       <summary className="cursor-pointer text-xs font-semibold">Advanced · Restore lost account connections</summary>
       <p className="mt-2 text-xs text-muted-foreground">Only needed if an older Vault import replaced the saved GitHub/Vercel account tokens. Normal imports now preserve them.</p>
@@ -403,6 +404,8 @@ export function VaultWorkspace({session}:{session:any}){
       <summary className="cursor-pointer text-xs font-semibold">Reference key library (optional — not saved credentials)</summary>
       <p className="mt-2 text-xs text-muted-foreground">These are examples from Vercel and GitHub. Expand only when you need a name that is not already in the saved keys above.</p>
       <VaultInventorySection records={records} onPersist={persist}/>
+    </details>
+
     </details>
   </section>;
 }
