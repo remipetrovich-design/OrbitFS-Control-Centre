@@ -522,7 +522,25 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
    if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
    const nextStatus=outcome==="success"?(authoritativeReceipt?"handed_off":"building"):"draft";
    const displayStatus=outcome==="success"&&!authoritativeKeys.has(draftKey)?"awaiting_receipt":nextStatus;
-   const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
+   let err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
+   if(outcome==="failure"){
+    try{
+     const jobResult=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id)+"/jobs?per_page=100");
+     const job=(jobResult?.jobs||[]).find((j:any)=>j.conclusion==="failure");
+     if(job){
+      const steps=(job.steps||[]).filter((step:any)=>step.conclusion==="failure").map((step:any)=>String(step.name||"")).filter(Boolean);
+      let details="";
+      try{
+       const raw=await operationsGithubText("/repos/"+workerRepo+"/actions/jobs/"+Number(job.id)+"/logs");
+       const parsed=extractOperationFailure(raw)||fallbackOperationFailure(job,raw);
+       details=String((parsed?.lines||[]).join("\\n")||parsed?.error||"").slice(-9000);
+      }catch{}
+      const label="Failed job: "+String(job.name||"unknown")+(steps.length?" | Steps: "+steps.join(", "):"");
+      const value=[label,details].filter(Boolean).join("\\n");
+      if(value)err=value.replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\\s+\\S+/gi,"Bearer [REDACTED]");
+     }
+    }catch(extractError){console.error("Failed run diagnostic unavailable",draft.id,extractError);}
+   }
    const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
    if(attemptError)throw attemptError;
    const {error:draftError}=await sb.from("panel_release_drafts").update({status:nextStatus,last_error:err,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building").eq("last_run_id",draft.last_run_id);
