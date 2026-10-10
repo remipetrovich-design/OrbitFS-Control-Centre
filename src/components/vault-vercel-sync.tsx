@@ -155,7 +155,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         const appliedItem=review.find(item=>item.id===row.id);
         if(!appliedItem)return row;
         const existing=(row.vercelTargets||[]).filter(t=>!(t.connection===account && t.projectId===sameProject.id));
-        return {...row,vercelTargets:[...existing,{connection:account,projectId:sameProject.id,projectName:sameProject.name,keyName:appliedItem.key}]};
+        return {...row,vercelTargets:[...existing,{connection:account,projectId:sameProject.id,projectName:sameProject.name,keyName:appliedItem.key}],syncReceipts:[...(row.syncReceipts||[]).filter(receipt=>!(receipt.provider==="Vercel"&&receipt.destination===sameProject.name&&receipt.keyName===appliedItem.key)),{provider:"Vercel" as const,destination:sameProject.name,account,keyName:appliedItem.key,at:new Date().toISOString()}]};
       });
       try {await onPersist(updated);}
       catch {throw new Error("Vercel accepted "+applied+" changes, but saving Vault target labels failed. Review Production; do not repeat the sync until checked.");}
