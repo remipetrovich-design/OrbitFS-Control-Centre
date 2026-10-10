@@ -45,6 +45,11 @@ on:
         required: false
         default: '{}'
         type: string
+      database_source_commit:
+        description: Exact central database package source commit selected by Dev Panel
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
