@@ -57,7 +57,11 @@ export function VaultGithubSync({session,records,onPersist}:{
   }
   async function run(label:string,task:()=>Promise<void>){
     setBusy(label);setError("");setNotice("");
-    try{await task()}catch(e:any){setError(String(e?.message||"GitHub Vault sync failed."))}
+    try{await task()}catch(e:any){
+      const message=String(e?.message||"GitHub Vault sync failed.");
+      const html=/<!doctype html|<html[\s>]|<body[\s>]|this page didn.t load/i.test(message);
+      setError(html?"GitHub Vault service returned an HTML error instead of API data. The service may be temporarily unavailable; check the Dev Panel server logs before retrying.":message.slice(0,600));
+    }
     finally{setBusy("")}
   }
   async function saveConnection(){
@@ -166,13 +170,13 @@ export function VaultGithubSync({session,records,onPersist}:{
       setNotice(additions.length+" exact GitHub Actions names added as blank Vault references. Protected secret values remain hidden; no GitHub settings changed.");
     });
   }
-  return <section className="orbit-panel p-4 space-y-4">
+  return <section className="orbit-panel min-w-0 max-w-full overflow-x-hidden p-4 space-y-4">
     <div className="flex items-start gap-2"><Github size={20} className="mt-0.5"/>
       <div><h2 className="text-base font-semibold">GitHub Actions Vault sync</h2>
         <p className="text-xs text-muted-foreground">Main and Fallback · Repository or existing Production environment · manual review · no release triggered</p>
       </div>
     </div>
-    {error&&<p className="rounded border border-red-400/40 p-2 text-xs text-red-300">{error}</p>}
+    {error&&<p className="rounded border border-red-400/40 p-2 text-xs text-red-300 break-words whitespace-pre-wrap">{error}</p>}
     {notice&&<p className="rounded border p-2 text-xs">{notice}</p>}
     <div className="flex gap-2">{(["main","fallback"] as const).map(a=>
       <button type="button" key={a} className={account===a?"button-primary":"button-secondary"} disabled={!!busy} onClick={()=>chooseAccount(a)}>
@@ -180,7 +184,7 @@ export function VaultGithubSync({session,records,onPersist}:{
     <p className="text-xs text-muted-foreground">Vault connection: {tokenRow?(tokenRow.secret.trim()?"Saved · not verified until repositories load":"Saved blank · add a real token to connect"):"Not configured"}.
       Use a token owned by {account==="main"?"lucaskerim123":"remipetrovich-design"} with access to all required repositories and Actions Secrets/Variables (read/write), Environments (read) and Metadata (read). Two shared connection slots are used, one per account, rather than one per repository. Actual permissions are controlled by GitHub. No tokens are written into GitHub Actions.</p>
     <div className="flex flex-wrap items-end gap-2">
-      <label className="block text-xs font-medium flex-1 min-w-52">GitHub Personal Access Token
+      <label className="block w-full min-w-0 text-xs font-medium sm:min-w-52 sm:flex-1">GitHub Personal Access Token
         <input type="password" autoComplete="off" className="control mt-1 font-mono" value={tokenInput}
           onChange={e=>setTokenInput(e.target.value)} placeholder={tokenRow?"Enter a replacement, change-me or leave blank":"Paste token or change-me"}/></label>
       <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void saveConnection()}>
