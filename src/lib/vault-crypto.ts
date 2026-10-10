@@ -12,6 +12,8 @@ export type VaultRecord={
   usedIn?: Array<"main"|"fallback">;
   /** Exact Vercel project name or GitHub owner/repository. Blank means not mapped. */
   destinationSystem?: string;
+  /** Explicit multi-target selection; legacy destinationSystem remains readable. */
+  destinationSystems?: string[];
   /** Original prefixed name retained for an auditable, reversible migration. */
   legacyKeyName?: string;
   needsReview?: boolean;
