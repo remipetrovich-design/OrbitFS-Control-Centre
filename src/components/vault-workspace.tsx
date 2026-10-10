@@ -11,6 +11,23 @@ import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord }
 import { preserveVaultConnections, isVaultConnection, bestVaultConnection, usableConnectionValue } from "@/lib/vault-connections";
 
 const SYSTEMS=[...VAULT_SYSTEMS];
+const VAULT_DESTINATIONS = [
+  {mode:"main",system:"License",service:"GitHub",value:"lucaskerim123/Custom-licence-manager"},
+  {mode:"main",system:"Billing",service:"GitHub",value:"lucaskerim123/V2_Billing_Store"},
+  {mode:"main",system:"Dev",service:"GitHub",value:"lucaskerim123/Dev-panel"},
+  {mode:"fallback",system:"License",service:"GitHub",value:"remipetrovich-design/OrbitFS-License-Administration"},
+  {mode:"fallback",system:"Billing",service:"GitHub",value:"remipetrovich-design/OrbitFS-Billing-Shopfront"},
+  {mode:"fallback",system:"Dev",service:"GitHub",value:"remipetrovich-design/OrbitFS-Control-Centre"},
+  {mode:"main",system:"License",service:"Vercel",value:"custom-licence-manager"},
+  {mode:"main",system:"Billing",service:"Vercel",value:"v2-billing-store"},
+  {mode:"main",system:"Dev",service:"Vercel",value:"base-deploy-panel"},
+  {mode:"fallback",system:"License",service:"Vercel",value:"orbitfs-license-fallback"},
+  {mode:"fallback",system:"Billing",service:"Vercel",value:"orbitfs-billing-fallback"},
+  {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
+] as const;
+const destinationsFor = (system:string,service:string,modes:VaultMode[]) =>
+  VAULT_DESTINATIONS.filter(item=>item.service===service && modes.includes(item.mode) && (system==="Other" || item.system===system));
+
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
 const SERVICES=[...VAULT_SERVICES];
 
@@ -265,12 +282,13 @@ export function VaultWorkspace({session}:{session:any}){
         <label className="block text-xs font-medium md:col-span-2">What this key is for<input className="control mt-1" value={draft.purpose} onChange={e=>setDraft({...draft,purpose:e.target.value})} placeholder="e.g. Billing API access to License Manager"/></label>
         <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
         <label className="block text-xs font-medium">Destination system · exact Vercel project or GitHub repository
-          <input className="control mt-1 font-mono" list="vault-destination-suggestions" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="e.g. v2-billing-store"/>
-          <datalist id="vault-destination-suggestions">
-            {["custom-licence-manager","v2-billing-store","base-deploy-panel","orbitfs-license-fallback","orbitfs-billing-fallback","orbitfs-dev-panel-fallback",
-              "lucaskerim123/V2_Billing_Store","remipetrovich-design/OrbitFS-Billing-Shopfront","lucaskerim123/V1-vercel-base","lucaskerim123/V1-vercel-engine",
-              "remipetrovich-design/OrbitFS-Base-System","remipetrovich-design/OrbitFS_Engine"].map(x=><option key={x} value={x}/>)}
-          </datalist>
+          <select className="control mt-1 font-mono" value={destinationsFor(draft.system,draft.service,draft.usedIn).some(item=>item.value===draft.destinationSystem)?draft.destinationSystem:"__custom__"} onChange={e=>setDraft({...draft,destinationSystem:e.target.value==="__custom__"?"":e.target.value})}>
+            <option value="__custom__">{draft.destinationSystem && !destinationsFor(draft.system,draft.service,draft.usedIn).some(item=>item.value===draft.destinationSystem)?"Custom / existing destination":"Choose a destination or enter custom"}</option>
+            {destinationsFor(draft.system,draft.service,draft.usedIn).map(item=><option key={item.mode+"-"+item.value} value={item.value}>{item.mode==="main"?"Main":"Fallback"} · {item.value}</option>)}
+          </select>
+          {!destinationsFor(draft.system,draft.service,draft.usedIn).some(item=>item.value===draft.destinationSystem)&&
+            <input className="control mt-2 font-mono" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="Custom Vercel project or owner/repository"/>}
+          <span className="mt-1 block text-xs text-muted-foreground">Options follow the selected system, provider and Main/Fallback checkboxes. Existing custom destinations remain editable.</span>
         </label>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">Key name is the actual environment variable name, not a Vault label. A key may exist more than once if its System, mode or destination differs. Sync never automatically adds/removes a prefix.</p>
