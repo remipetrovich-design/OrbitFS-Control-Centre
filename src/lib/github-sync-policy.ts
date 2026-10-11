@@ -1,7 +1,7 @@
 export type GithubAccount = "main" | "fallback";
 export type GithubScope = "repository" | "production";
 export type GithubKind = "secret" | "variable";
-export type GithubItem = { name: string; updatedAt: string | null; createdAt: string | null };
+export type GithubItem = { name: string; updatedAt: string | null; createdAt: string | null; value?: string };
 export type GithubPlan =
   | { action: "create"; key: string; expectedUpdatedAt: null }
   | { action: "replace"; key: string; expectedUpdatedAt: string }
