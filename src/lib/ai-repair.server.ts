@@ -287,3 +287,27 @@ export const hideAiRepairGithubRun=createServerFn({method:"POST"}).handler(async
  const result=await repairDbRead("rpc/repair_hide_run",{method:"POST",body:{p_profile:profile,p_repository:data.repo,p_run_id:data.runId}});
  return {hidden:result===true,profile,githubPreserved:true};
 });
+
+export const requestAiRepairRunDiagnosis=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number;confirm:string}})=>{
+ requireOwner(data.token);
+ if(data.confirm!=="REQUEST_AI_REPAIR")throw Error("Explicit repair request confirmation required");
+ if(!Number.isSafeInteger(data.runId)||data.runId<=0)throw Error("Invalid workflow run ID");
+ const selection=await active();
+ const allowed=[selection.baseRepo,selection.engineRepo,githubProfileDefinitions()[selection.profile].devPanel.repo];
+ if(!allowed.includes(data.repo))throw Error("Cannot repair repository outside the active GitHub profile");
+ const run=await(await github(data.repo,"/actions/runs/"+data.runId,selection.profile)).json();
+ if(run.conclusion!=="failure")throw Error("The selected GitHub workflow is not failed");
+ const repairToken=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ if(!repairToken)throw Error("AI_REPAIR_WORKER_GITHUB_TOKEN is missing from this Dev Panel Production environment");
+ const payload={ref:"main",inputs:{verify_only:"false",target_repo:data.repo,target_run_id:String(data.runId)}};
+ const response=await fetch("https://api.github.com/repos/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml/dispatches",{
+  method:"POST",headers:{Authorization:"Bearer "+repairToken,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
+  body:JSON.stringify(payload),signal:timeout()
+ });
+ if(!response.ok){
+  const code=response.status;
+  if(code===401||code===403)throw Error("AI Repair worker token lacks GitHub Actions write permission (HTTP "+code+"). Check AI_REPAIR_WORKER_GITHUB_TOKEN access to remipetrovich-design/AI-Repair-Centre.");
+  throw Error("Could not submit diagnosis to AI Repair worker: GitHub HTTP "+code);
+ }
+ return {submitted:true,profile:selection.profile,runId:data.runId,repo:data.repo,workerUrl:"https://github.com/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml",noAutoWrites:true};
+});
