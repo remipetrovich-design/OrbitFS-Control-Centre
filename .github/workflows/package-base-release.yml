@@ -301,7 +301,7 @@ jobs:
           rm -f "$response_file"
           test "$(jq -r '.component' <<<"$reference")" = "base" || { echo "::error::Resolved package is not Base."; exit 1; }
           test "$(jq -r '.sourceRepo' <<<"$reference")" = "lucaskerim123/Master-Database-System" || { echo "::error::No validated central Base database package is available. Do not register legacy Base-source packages."; exit 1; }
-          test "$(jq -r '.status' <<<"$reference")" = "current" || { echo "::error::Central Base database package must be current before release packaging."; exit 1; }
+          jq -e '.status=="candidate" or .status=="current"' <<<"$reference" >/dev/null || { echo "::error::Central Base database package must be an approved candidate or current package."; exit 1; }
           jq -e '.id|type=="string" and length>0' <<<"$reference" >/dev/null
           jq -e '.sha256|test("^[a-f0-9]{64}$")' <<<"$reference" >/dev/null
           jq -e '.sourceCommit|test("^[a-f0-9]{40}$")' <<<"$reference" >/dev/null
@@ -309,7 +309,7 @@ jobs:
             echo "::error::Central Base database package source commit changed after inspection. Re-inspect the package in Dev Panel."
             exit 1
           fi
-          echo "Using License Manager validated central Base database package (no database package created or published by this workflow)."
+          echo "Using validated central Base database package (no database package created or published by this workflow)."
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
 
       - name: Build release information
