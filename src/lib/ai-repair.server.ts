@@ -78,17 +78,40 @@ export const getAiRepairJobLog=createServerFn({method:"POST"}).handler(async({da
 });
 export const getAiRepairServiceState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
- if(!workerConfig().configured)return {configured:false,available:false,error:"Repair service not configured. Read-only GitHub inspection is available."};
+ if(!workerConfig().configured){
+  const historyAvailable=Boolean(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY);
+  return {configured:historyAvailable,available:false,historyAvailable,mode:historyAvailable?"scheduled-github-actions":"unconfigured",automaticAIRequestsEnabled:historyAvailable,error:historyAvailable?"Repair history connected. Scheduled GitHub Actions diagnosis requires a successful worker run. Manual sandbox actions need a dedicated backend.":"Set REPAIR_SUPABASE_SERVICE_ROLE_KEY in the Dev Panel server to read persisted diagnoses."};
+ }
  try{return {configured:true,available:true,...await repairService("status")}}catch(e:any){return {configured:true,available:false,error:e.message};}
 });
 export const getAiRepairIncidents=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
- return await repairService("incidents");
+ if(workerConfig().configured)return await repairService("incidents");
+ const selection=await active();
+ if(!process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY)return {incidents:[],historyAvailable:false};
+ const key=String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY);
+ const root="https://ffmfogljikvybzgunauo.supabase.co/rest/v1/repair_incidents?profile=eq."+(selection.profile==="primary"?"main":"fallback")+"&order=detected_at.desc&limit=150";
+ const response=await fetch(root,{headers:{apikey:key,Authorization:"Bearer "+key},cache:"no-store",signal:AbortSignal.timeout(8000)});
+ if(!response.ok)throw new Error("Repair history lookup failed: "+response.status);
+ const rows=await response.json();
+ return {historyAvailable:true,incidents:rows.map((row:any)=>({id:row.id,profile:row.profile,kind:row.kind,repo:row.repository,sha:row.source_sha,runId:row.run_id,jobId:row.job_id,runUrl:row.run_url,workflow:row.workflow_name,jobName:row.job_name,failedSteps:row.failed_steps,status:row.status,classification:row.classification,detectedAt:row.detected_at,logExcerpt:row.error_excerpt?.slice(-3000)}))};
 });
 export const getAiRepairIncident=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;source?:boolean}})=>{
  requireOwner(data.token);
  if(!/^[a-z0-9-]{1,80}$/i.test(data.incidentId))throw Error("Invalid incident ID");
- return await repairService("incidents/"+data.incidentId+(data.source?"?source=true":""));
+ if(workerConfig().configured)return await repairService("incidents/"+data.incidentId+(data.source?"?source=true":""));
+ const selection=await active();
+ const key=String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"");
+ if(!key)throw new Error("Repair history is not connected");
+ const headers={apikey:key,Authorization:"Bearer "+key};
+ const fetchRows=async(url:string)=>{const r=await fetch("https://ffmfogljikvybzgunauo.supabase.co/rest/v1/"+url,{headers,cache:"no-store",signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error("Repair history lookup: "+r.status);return await r.json()};
+ const rows=await fetchRows("repair_incidents?id=eq."+encodeURIComponent(data.incidentId)+"&limit=1");
+ const row=rows?.[0];if(!row||row.profile!==(selection.profile==="primary"?"main":"fallback"))throw new Error("Incident unavailable in active profile");
+ const diagnosed=row.fingerprint?await fetchRows("repair_diagnoses?repository=eq."+encodeURIComponent(row.repository)+"&fingerprint=eq."+encodeURIComponent(row.fingerprint)+"&origin=eq.openrouter&limit=1"):[];
+ const diagnosis=diagnosed?.[0]||null;
+ const proposals=diagnosis?await fetchRows("repair_proposals?diagnosis_id=eq."+encodeURIComponent(diagnosis.id)+"&limit=1"):[];
+ const proposal=proposals?.[0]?.proposal||null;
+ return {incident:{id:row.id,repo:row.repository,profile:row.profile,kind:row.kind,runId:row.run_id,jobId:row.job_id,sha:row.source_sha,classification:row.classification,log:row.error_excerpt,ai:diagnosis?{status:"completed",diagnosis:{summary:diagnosis.summary,confidence:diagnosis.confidence},proposal}:null},diagnosis:{classification:row.classification,confidence:diagnosis?.confidence||"low",recommendation:diagnosis?.recommendation||"Inspect failed source; do not bypass release approval",components:[]},source:[],copyForAI:["OrbitFS repair",row.repository,row.source_sha,row.error_excerpt].join("\n")};
 });
 export const requestAiRepairDiagnosis=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;confirm:string}})=>{
  requireOwner(data.token);
