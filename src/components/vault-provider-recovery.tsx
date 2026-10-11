@@ -169,7 +169,7 @@ export function VaultProviderRecovery({session,records,onPersist}:{
               for(const item of res.envs){
                 if(!validName(item.key)||reservedConnection(item.key))continue;
                 let value="";
-                if(item.visibility==="config"&&item.type!=="sensitive"){
+                if(item.visibility!=="secret"&&!["sensitive","secret"].includes(item.type)){
                   try{
                     const found=await importVaultVercelConfig({data:{...args,envId:item.id,expectedUpdatedAt:item.updatedAt}});
                     value=found.value;
@@ -179,8 +179,8 @@ export function VaultProviderRecovery({session,records,onPersist}:{
                 }
                 add({id:crypto.randomUUID(),systems:[systemForProject(projectName)],otherSystem:"",
                   service:"Vercel",customService:"",keyName:item.key,secret:value,
-                  purpose:value?"Readable Vercel Production Config":"Vercel Production variable · value unavailable",
-                  valueSource:value?"Vercel read-only pull":"Vercel Production inventory",
+                  purpose:value?"Vercel Production · readable value recovered":"Vercel Production · value unavailable",
+                  valueSource:value?"Vercel decrypted read-only pull":"Vercel Production inventory",
                   usedIn:[mode],destinationSystem:projectName,needsReview:false,
                   vercelTargets:[{connection:mode,projectId:project.id,projectName,keyName:item.key}]});
               }
