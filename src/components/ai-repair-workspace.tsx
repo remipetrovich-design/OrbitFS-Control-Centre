@@ -1,9 +1,9 @@
-import {useCallback,useEffect,useMemo,useState,type ReactNode} from "react";
+import {useCallback,useEffect,useMemo,useRef,useState,type ReactNode} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,FileCode2,Github,Loader2,RefreshCw,Search,ShieldCheck,Terminal,Wrench, Zap} from "lucide-react";
-import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation,getAiRepairControls,saveAiRepairControls,requestAiRepairWorkerCheck,requestAiRepairRunDiagnosis,archiveAiRepairIncident,hideAiRepairGithubRun} from "@/lib/ai-repair.server";
+import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation,getAiRepairControls,saveAiRepairControls,requestAiRepairWorkerCheck,requestAiRepairRunDiagnosis,archiveAiRepairIncident,hideAiRepairGithubRun,getAiRepairLiveActions} from "@/lib/ai-repair.server";
 
 type RepairPolicy={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
-type Section="incidents"|"workspace"|"settings";
+type Section="incidents"|"workspace"|"settings"|"console";
 function date(v?:string){return v?new Date(v).toLocaleString():"—"}
 function Pill({label,ok}:{label:string;ok?:boolean}){return <span className={`orbit-status-pill ${ok===true?"orbit-status-tone-success":ok===false?"orbit-status-tone-warning":"orbit-status-tone-neutral"}`}>{label}</span>}
 function Card({title,children}:{title:string;children:ReactNode}){return <section className="rounded-xl border border-border bg-card p-4 space-y-3"><h3 className="text-sm font-semibold">{title}</h3>{children}</section>}
@@ -28,6 +28,12 @@ export function AiRepairWorkspace({session}:{session:any}){
  const [busy,setBusy]=useState("");
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
+ const [live,setLive]=useState<any>(null);
+ const [liveError,setLiveError]=useState("");
+ const [liveBusy,setLiveBusy]=useState(false);
+ const [liveAutoRefresh,setLiveAutoRefresh]=useState(true);
+ const [liveCheckedAt,setLiveCheckedAt]=useState("");
+ const liveInFlight=useRef(false);
  const token=session.token;
  const load=useCallback(async()=>{
   setBusy("refresh");setError("");
@@ -126,6 +132,20 @@ export function AiRepairWorkspace({session}:{session:any}){
   finally{setBusy("")}
  }
  useEffect(()=>{if(section==="settings")void loadControls()},[section,token]);
+ const refreshLive=useCallback(async()=>{
+  if(liveInFlight.current)return;
+  liveInFlight.current=true;setLiveBusy(true);setLiveError("");
+  try{const result=await getAiRepairLiveActions({data:{token}});setLive(result);setLiveCheckedAt(new Date().toISOString())}
+  catch(e:any){setLiveError(e?.message||"Unable to read worker jobs")}
+  finally{liveInFlight.current=false;setLiveBusy(false)}
+ },[token]);
+ useEffect(()=>{
+  if(section!=="console")return;
+  void refreshLive();
+  if(!liveAutoRefresh)return;
+  const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refreshLive()},20000);
+  return()=>window.clearInterval(timer);
+ },[section,liveAutoRefresh,refreshLive]);
  const total=rows.length;
  const current=overview?.selection;
  const available=Boolean(service?.available);
@@ -145,8 +165,34 @@ export function AiRepairWorkspace({session}:{session:any}){
    ].map(([title,value,Icon]:any)=><div key={title} className="rounded-xl border border-border bg-card p-4"><p className="flex items-center gap-2 text-xs text-muted-foreground"><Icon size={14}/>{title}</p><p className="mt-3 text-xl font-semibold">{value}</p></div>)}
   </div>
   <nav className="flex flex-wrap gap-2 border-b border-border pb-3" aria-label="AI Repair Centre menu">
-   {([["incidents","Incidents"],["workspace","Repair workspace"],["settings","Settings"]] as const).map(([id,label])=><button key={id} type="button" onClick={()=>setSection(id)} aria-current={section===id?"page":undefined} className={`rounded-md border px-4 py-2 text-sm font-medium ${section===id?"border-primary bg-primary text-primary-foreground":"border-border bg-card text-foreground hover:bg-muted"}`}>{label}</button>)}
+   {([["incidents","Incidents"],["workspace","Repair workspace"],["console","Live action console"],["settings","Settings"]] as const).map(([id,label])=><button key={id} type="button" onClick={()=>setSection(id)} aria-current={section===id?"page":undefined} className={`rounded-md border px-4 py-2 text-sm font-medium ${section===id?"border-primary bg-primary text-primary-foreground":"border-border bg-card text-foreground hover:bg-muted"}`}>{label}</button>)}
   </nav>
+  {section==="console"&&<div className="space-y-3">
+   <Card title="Live AI Repair Actions">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+     <p className="text-xs text-muted-foreground">Read-only GitHub Actions status. Updated {liveCheckedAt?date(liveCheckedAt):"not yet"}.</p>
+     <div className="flex flex-wrap items-center gap-3">
+      <label className="inline-flex items-center gap-2 text-xs"><input type="checkbox" checked={liveAutoRefresh} onChange={e=>setLiveAutoRefresh(e.target.checked)}/> Auto-refresh every 20 seconds</label>
+      <button type="button" className="button-secondary" disabled={liveBusy} onClick={()=>void refreshLive()}><RefreshCw size={14} className={liveBusy?"animate-spin":""}/> Refresh now</button>
+     </div>
+    </div>
+    {liveError&&<p role="alert" className="text-sm text-destructive">{liveError}</p>}
+    {live?.available===false&&<p className="text-sm text-muted-foreground">{live.reason||"Worker status unavailable."}</p>}
+    {live?.available&&<div className="flex flex-wrap gap-2"><Pill label={live.profile+" profile"}/><Pill label={String(live.activeCount||0)+" active run(s)"} ok={Number(live.activeCount)>0}/><span className="text-xs text-muted-foreground">{live.repo}</span></div>}
+    {live?.available&&!live.runs?.length&&<p className="text-sm text-muted-foreground">No recent worker runs. New jobs appear on the next refresh.</p>}
+   </Card>
+   {(live?.runs||[]).map((run:any)=><Card key={run.id} title={run.workflow||"AI Repair worker"}>
+    <div className="flex flex-wrap items-center gap-2"><Pill label={run.conclusion||run.status||"unknown"} ok={run.conclusion==="success"}/><span className="text-xs text-muted-foreground">Run #{run.id} · {run.branch||"unknown branch"} · {run.sha?.slice(0,10)||"no SHA"}</span><a href={run.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs underline">Open GitHub run <ExternalLink size={12}/></a></div>
+    <p className="text-xs text-muted-foreground">Started {date(run.startedAt||run.createdAt)} · Updated {date(run.updatedAt)}</p>
+    {run.error&&<p className="text-xs text-destructive">{run.error}</p>}
+    {run.jobs?.length===0&&<p className="text-xs text-muted-foreground">GitHub has not reported job steps yet.</p>}
+    {(run.jobs||[]).map((job:any)=><details key={job.id} className="rounded-lg border border-border p-3" open={["in_progress","queued"].includes(job.status)}>
+      <summary className="cursor-pointer text-sm font-medium">{job.name} · {job.conclusion||job.status||"queued"}</summary>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs"><span>Started {date(job.startedAt)}</span>{job.completedAt&&<span>Completed {date(job.completedAt)}</span>}<a className="underline" href={job.url} target="_blank" rel="noreferrer">Open job</a></div>
+      <ol className="mt-2 space-y-1">{(job.steps||[]).map((step:any)=><li key={step.number} className="flex items-center justify-between gap-3 rounded border border-border/50 px-2 py-1 text-xs"><span>{step.number}. {step.name}</span><Pill label={step.conclusion||step.status||"pending"} ok={step.conclusion==="success"}/></li>)}</ol>
+    </details>)}
+   </Card>)}
+  </div>}
   {section==="incidents"&&<>
    <div className="flex flex-wrap items-center gap-2"><div className="relative min-w-[220px] flex-1"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15}/><input className="control w-full pl-9" placeholder="Search failures, repository, run…" value={query} onChange={e=>setQuery(e.target.value)}/></div><select className="control max-w-[150px]" value={kind} onChange={e=>setKind(e.target.value)}><option value="all">All systems</option><option value="base">Base</option><option value="engine">Engine</option></select><Pill label={total+" results"}/></div>
    {overview?.groups?.some((g:any)=>g.error)&&<Card title="Connection warnings">{overview.groups.filter((g:any)=>g.error).map((g:any)=><p key={g.repo} className="text-xs text-muted-foreground">{g.repo}: {g.error}</p>)}</Card>}
