@@ -275,7 +275,7 @@ export function VaultWorkspace({session}:{session:any}){
     try{
       const existing=new Map(records.map(row=>[recordIdentity(row),row]));
       const additions=importRows.filter(row=>!existing.has(recordIdentity(row)));
-      const overrides=importMode==="override"?importRows.filter(row=>existing.has(recordIdentity(row))):[];
+      const overrides=importMode==="override"?importRows.filter(row=>existing.has(recordIdentity(row)) && (Boolean(row.secret.trim()) || !existing.get(recordIdentity(row))?.secret?.trim())):[];
       const replacements=new Map(overrides.map(row=>[recordIdentity(row),row]));
       if(importMode!=="replace-all"&&!additions.length&&!overrides.length)throw new Error("Nothing new to import.");
       const next=records.map(row=>{
@@ -468,8 +468,35 @@ export function VaultWorkspace({session}:{session:any}){
 
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
       <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
-      <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><button type="button" className="button-secondary" disabled={busy||!records.length} onClick={downloadCurrentValuesJson}><Download size={14}/> Download JSON with saved values (unencrypted)</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
-      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace old keys with this JSON (keep GitHub/Vercel account connections)</label></fieldset><p className="text-xs text-muted-foreground">{importMode==="replace-all"?`All existing non-connection Vault entries will be replaced with ${importRows.length} imported entries. Existing GitHub/Vercel account connections are preserved.`:`${importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length} matching entries will be ${importMode==="skip"?"skipped":"overwritten"}.`}</p>{importMode==="replace-all"&&<div className="space-y-2 rounded border p-3"><p className="text-xs">Back up before replacing. GitHub/Vercel connections are preserved, but other keys may be replaced and provider secrets generally cannot be read back.</p><button className="button-secondary" type="button" onClick={downloadEncryptedBackup}><Download size={14}/> Export encrypted old Vault backup</button><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> I approve replacing old non-connection entries. My GitHub and Vercel account connections must remain intact.</label></div>}<div className="flex gap-2"><button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{importMode==="replace-all"?"Replace non-connection keys":"Import entries"}</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
+      <section className="mt-3 rounded-lg border border-border p-3 space-y-3" aria-label="JSON import and conflict settings">
+        <h3 className="text-sm font-semibold">Import JSON · choose how existing keys are handled</h3>
+        <fieldset className="space-y-2 text-xs">
+          <legend className="font-medium">When the imported key already exists in this Vault</legend>
+          <label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} disabled={busy} onChange={()=>setImportMode("skip")}/> Skip existing · keep the saved Vault value (default)</label>
+          <label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} disabled={busy} onChange={()=>setImportMode("override")}/> Override existing · update from JSON (blank values never erase saved secrets)</label>
+          <label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} disabled={busy} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace all non-connection Vault entries · destructive to local Vault only</label>
+        </fieldset>
+        <p className="text-xs text-muted-foreground">Import only edits encrypted Vault entries. GitHub Actions and Vercel variables are never changed or deleted by importing.</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button>
+          <button type="button" className="button-secondary" disabled={busy||!records.length} onClick={downloadCurrentValuesJson}><Download size={14}/> Download JSON with saved values (unencrypted)</button>
+          <label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" disabled={busy} onChange={e=>void prepareImport(e)}/></label>
+        </div>
+        {importRows.length>0&&<div className="space-y-3 border-t pt-3">
+          <p className="text-xs font-medium">{importRows.length} entries ready to import. Values remain hidden.</p>
+          <div className="max-h-40 overflow-auto text-xs space-y-1">{importRows.map(row=><p key={row.id} className="border-b py-1 break-all font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"} {row.secret?"· value supplied":"· blank value"}</p>)}</div>
+          <p className="text-xs text-muted-foreground">Matching entries: {importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length}. Selection: {importMode==="skip"?"Skip saved keys":importMode==="override"?"Override saved keys":"Replace all non-connection entries"}.</p>
+          {importMode==="replace-all"&&<div className="rounded border p-3 space-y-2">
+            <p className="text-xs">This removes existing non-connection Vault records not present in the JSON. It never changes GitHub or Vercel. Download an encrypted backup first.</p>
+            <button type="button" className="button-secondary" onClick={downloadEncryptedBackup}><Download size={14}/> Download encrypted backup</button>
+            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> Confirm replacing local non-connection entries; keep saved provider connections</label>
+          </div>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{busy?"Importing…":importMode==="skip"?"Import · skip existing":importMode==="override"?"Import · override existing":"Replace local Vault entries"}</button>
+            <button type="button" className="button-secondary" disabled={busy} onClick={()=>setImportRows([])}>Cancel import</button>
+          </div>
+        </div>}
+      </section>
 
     <details className="orbit-panel p-4">
       <summary className="cursor-pointer text-xs font-semibold">Advanced · Restore lost account connections</summary>
