@@ -36,7 +36,6 @@ export function ReleaseWorkspace(p:any){
  const [promotionRun,setPromotionRun]=useState<any>(null);
  const [branchSync,setBranchSync]=useState<any>(null);
  const [sourceCheckNonce,setSourceCheckNonce]=useState(0);
- const [autoRefresh,setAutoRefresh]=useState(true);
  const [lastAutoRefresh,setLastAutoRefresh]=useState<string|null>(null);
  const runningBuild=Boolean(
   (p.run?.id&&!["success","failure","cancelled","skipped","completed"].includes(String(p.run.conclusion||p.run.status||"").toLowerCase()))||
@@ -45,7 +44,7 @@ export function ReleaseWorkspace(p:any){
   branchSync?.active
  );
  useEffect(()=>{
-  if(!autoRefresh||!runningBuild)return;
+  if(p.autoRefreshRuns===false||!runningBuild)return;
   let stopped=false,inFlight=false;
   const tick=async()=>{
    if(stopped||inFlight||document.visibilityState!=="visible")return;
@@ -56,9 +55,9 @@ export function ReleaseWorkspace(p:any){
   const timer=window.setInterval(()=>void tick(),20000);
   document.addEventListener("visibilitychange",tick);
   return()=>{stopped=true;window.clearInterval(timer);document.removeEventListener("visibilitychange",tick)};
- },[autoRefresh,runningBuild,p.session.token,p.type]);
+ },[p.autoRefreshRuns,runningBuild,p.session.token,p.type]);
  const autoRefreshControl=<label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-  <input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)}/>
+  <input type="checkbox" checked={p.autoRefreshRuns!==false} onChange={e=>p.setAutoRefreshRuns?.(e.target.checked)}/>
   Auto refresh {runningBuild?"· every 20s while running":"· waiting for a job"}
   {lastAutoRefresh&&<span className="text-muted-foreground">Updated {lastAutoRefresh}</span>}
  </label>;
