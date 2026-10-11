@@ -1,7 +1,8 @@
 import {useCallback,useEffect,useMemo,useState,type ReactNode} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,FileCode2,Github,Loader2,RefreshCw,Search,ShieldCheck,Terminal,Wrench, Zap} from "lucide-react";
-import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation} from "@/lib/ai-repair.server";
+import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation,getAiRepairControls,saveAiRepairControls,requestAiRepairWorkerCheck} from "@/lib/ai-repair.server";
 
+type RepairPolicy={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string};
 type Section="overview"|"incidents"|"workspace"|"history"|"recovery"|"settings";
 const SECTIONS:[Section,string][]=[["overview","Overview"],["incidents","Incidents"],["workspace","Repair workspace"],["history","Job history"],["recovery","Release recovery"],["settings","Settings"]];
 function date(v?:string){return v?new Date(v).toLocaleString():"—"}
@@ -11,6 +12,8 @@ function Copy({text}:{text:string}){const [done,setDone]=useState(false);return 
 
 export function AiRepairWorkspace({session}:{session:any}){
  const [section,setSection]=useState<Section>("overview");
+ const [controls,setControls]=useState<any>(null);
+ const [policy,setPolicy]=useState<RepairPolicy|null>(null);
  const [overview,setOverview]=useState<any>(null);
  const [service,setService]=useState<any>(null);
  const [incidents,setIncidents]=useState<any[]>([]);
@@ -79,6 +82,26 @@ export function AiRepairWorkspace({session}:{session:any}){
   setBusy("validate");setError("");
   try{const result=await validateAiRepairProposal({data:{token,incidentId:selected.id,proposal,confirm:"VALIDATE_ISOLATED_REPAIR"}});setValidation(result);setNotice(result.status==="validated"?"Sandbox checks passed. Source is unchanged.":"Sandbox checks did not pass.")}catch(e:any){setError(e.message||"Validation failed")}finally{setBusy("")}
  }
+ async function loadControls(){
+  setBusy("repair-settings");setError("");
+  try{const next=await getAiRepairControls({data:{token}});setControls(next);setPolicy(next.settings||null)}
+  catch(e:any){setError(e.message||"Repair settings cannot be loaded")}
+  finally{setBusy("")}
+ }
+ async function saveControls(){
+  if(!policy)return;
+  setBusy("save-policy");setError("");
+  try{const result=await saveAiRepairControls({data:{token,settings:policy}});setPolicy(result.settings);setNotice("Repair policy saved and audited for "+result.profile);await loadControls()}
+  catch(e:any){setError(e.message||"Policy save failed")}
+  finally{setBusy("")}
+ }
+ async function workerCheck(){
+  setBusy("worker-check");setError("");
+  try{const result=await requestAiRepairWorkerCheck({data:{token,verifyOnly:true}});setNotice("Read-only worker verification dispatched for "+result.profile)}
+  catch(e:any){setError(e.message||"Worker verification could not start")}
+  finally{setBusy("")}
+ }
+ useEffect(()=>{if(section==="settings")void loadControls()},[section,token]);
  const total=rows.length;
  const current=overview?.selection;
  const available=Boolean(service?.available);
@@ -118,6 +141,28 @@ export function AiRepairWorkspace({session}:{session:any}){
    </>}
   </div>}
   {section==="recovery"&&<Card title="Release recovery"><p className="text-sm text-muted-foreground">Repair results must re-enter the existing GitHub release workflow, License Manager validation and technical approval. Billing final review and publication are always manual.</p><div className="flex flex-wrap gap-2"><Pill label="Automatic publication disabled" ok/><Pill label="Recovery dispatch not configured"/></div><p className="text-xs text-muted-foreground">No alternate release registry or approval state is created here.</p></Card>}
-  {section==="settings"&&<div className="grid gap-3 md:grid-cols-2"><Card title="Service connection"><Pill label={available?"Repair service connected":service?.historyAvailable?"Persistent repair history connected":"Repair service not connected"} ok={available||Boolean(service?.historyAvailable)}/><p className="text-xs text-muted-foreground">{service?.error||"Connected server-side. Credentials stay out of browser code."}</p><p className="text-xs text-muted-foreground">The worker requires an approved host or GitHub Actions adapter. These settings are server-managed.</p></Card><Card title="Profile and source authority"><p className="text-sm">Active profile: <b>{current?.profile||"unavailable"}</b></p><p className="text-xs break-all">{current?.baseRepo}</p><p className="text-xs break-all">{current?.engineRepo}</p><p className="text-xs text-muted-foreground">This page follows License Manager's existing switch. It cannot override the profile.</p></Card><Card title="AI and usage"><p className="text-sm">OpenRouter: automatic for new error signatures when the backend is connected and enabled</p><p className="text-xs text-muted-foreground">Matching repeat errors reuse the previous analysis without additional model calls. Free models only, capped daily usage; no automatic source writes or publication.</p></Card><Card title="Safety policy"><p className="text-sm">Restricted repairs and audited validation</p><p className="text-xs text-muted-foreground">No remote source writes or release actions from this UI. Production release authorisation belongs to License Manager. Customer publication remains manual.</p></Card></div>}
+  {section==="settings"&&<div className="space-y-4">
+   <Card title="Repair service and worker health">
+    <div className="flex flex-wrap items-center gap-2"><Pill label={controls?.connected?"Repair database connected":"Repair database disconnected"} ok={Boolean(controls?.connected)}/><Pill label={controls?.workerDispatchConfigured?"GitHub worker dispatch connected":"Worker dispatch unavailable"} ok={Boolean(controls?.workerDispatchConfigured)}/><Pill label={current?.profile==="primary"?"MAIN selected":"FALLBACK selected"}/></div>
+    <p className="text-xs text-muted-foreground">{controls?.connected?"This Dev Panel can read/write repair settings and history. GitHub Actions runs the separate scheduled scanner.":"This Dev Panel is missing the server-side Supabase service credential. GitHub Actions has its own credential and may operate independently."}</p>
+    <p className="text-xs text-muted-foreground">Supabase project: orbitfs-ai-repair · ffmfogljikvybzgunauo. Never place service keys in the browser or public environment variables.</p>
+    <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" disabled={Boolean(busy)} onClick={()=>void loadControls()}><RefreshCw size={14}/> Test and refresh connection</button><button type="button" className="button-secondary" disabled={Boolean(busy)||!controls?.workerDispatchConfigured} onClick={()=>void workerCheck()}><Terminal size={14}/> Run read-only worker check</button><a className="button-secondary" target="_blank" rel="noreferrer" href="https://github.com/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml">Worker runs <ExternalLink size={13}/></a></div>
+    {controls?.counts&&<p className="text-xs">Stored incidents in selected mode: <b>{controls.counts.storedIncidents}</b> · OpenRouter requests reserved today across both profiles: <b>{controls.counts.aiUsedToday}</b></p>}
+   </Card>
+   <Card title="Automatic diagnosis policy — active profile">
+    <p className="text-xs text-muted-foreground">Settings are saved per profile. Changes here affect <b>{controls?.profile||"the active profile"}</b> only. Switching the authoritative License Manager profile retains the other profile's settings and history. No release approval authority is changed.</p>
+    {!policy?<p className="text-sm text-muted-foreground">Policy unavailable until this Dev Panel has access to the dedicated Supabase project.</p>:<>
+     <div className="grid gap-3 sm:grid-cols-2">
+      {([["enabled","Enable repair monitoring"],["auto_diagnose","Automatically diagnose new failures"],["enable_base","Monitor Base releases"],["enable_engine","Monitor Update/Engine releases"],["enable_release_worker","Include Dev Panel Base build worker"],["enable_sql_diagnosis","Allow SQL diagnosis proposals"]] as [keyof RepairPolicy,string][]).map(([key,label])=><label key={key} className="flex cursor-pointer items-center gap-2 rounded-md border border-border p-3 text-xs"><input type="checkbox" checked={Boolean(policy[key])} onChange={e=>setPolicy((p:any)=>({...p,[key]:e.target.checked}))}/>{label}</label>)}
+      <label className="text-xs">Lookback window (hours, 1–24)<input className="control mt-1 w-full" type="number" min={1} max={24} value={policy.lookback_hours} onChange={e=>setPolicy((p:any)=>({...p,lookback_hours:Number(e.target.value)}))}/></label>
+      <label className="text-xs">OpenRouter daily limit (1–5, shared across both profiles)<input className="control mt-1 w-full" type="number" min={1} max={5} value={policy.daily_ai_limit} onChange={e=>setPolicy((p:any)=>({...p,daily_ai_limit:Number(e.target.value)}))}/></label>
+      <label className="text-xs sm:col-span-2">Free OpenRouter model ID<input className="control mt-1 w-full" value={policy.model} onChange={e=>setPolicy((p:any)=>({...p,model:e.target.value}))}/></label>
+     </div>
+     <p className="text-xs text-muted-foreground">The worker enforces these controls on its next scheduled run. Free models only; no source editing, automatic SQL execution, deployment, licence approval or customer publication.</p>
+     <div className="flex flex-wrap items-center gap-3"><button type="button" className="button-primary" disabled={Boolean(busy)||!controls?.connected} onClick={()=>void saveControls()}><ShieldCheck size={14}/> Save repair policy</button><button type="button" className="button-secondary" onClick={()=>void loadControls()} disabled={Boolean(busy)}>Discard changes</button></div>
+    </>}
+   </Card>
+   <Card title="SQL repair safety and release authority"><p className="text-xs text-muted-foreground">SQLSTATE and migration failures may receive AI analysis and a forward-only proposed migration. A proposal is not an applied or verified repair. Applied migration history, customer databases, production deployments and release approval remain protected under License Manager. Billing final publication remains manual.</p></Card>
+  </div>}
  </div>;
 }
