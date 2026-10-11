@@ -266,9 +266,6 @@ jobs:
               if(p==='lib/core/releases.ts'||p==='app/api/v1/engine-bootstrap/route.ts'){
                 value=value.replace(/ORBITFS_(?:FALLBACK_GITHUB_TOKEN|RELEASE_DISPATCH_TOKEN)/g,targetTokenEnv);
               }
-              if(p==='app/api/v1/engine-bootstrap/route.ts'){
-                value=value.replace(/String\(repository\.id\) !== '\d+'/,"String(repository.id) !== '"+targetEngineRepoId+"'");
-              }
               if(p==='app/layout.tsx'){
                 value=value.replace(/const LOCAL_PROFILE='(?:primary|fallback)' as const;/,"const LOCAL_PROFILE='"+targetProfile+"' as const;");
                 value=value.replace(/const LOCAL_LABEL='[^']*';/,"const LOCAL_LABEL='"+targetLabel.replace(/'/g,"\\'")+"';");
@@ -316,7 +313,6 @@ jobs:
             mustContain('app/layout.tsx',"const LOCAL_PROFILE='"+targetProfile+"' as const",'License Manager local profile');
             mustContain('database/migrations/20261004100000_license_manager_github_profile.sql',"default '"+targetProfile+"'",'License Manager first-run profile');
             mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngine,'License Manager Engine repository');
-            mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngineRepoId,'License Manager Engine repository id');
           }else if(key==='billing'){
             mustContain('scripts/release-manifest.mjs',targetBilling,'Billing manifest repository');
           }else if(key==='control'){
