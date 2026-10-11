@@ -275,43 +275,41 @@ jobs:
           }
           echo "Customer DB snapshot is current: $migration_count_packaged migrations, latest $packaged_latest_migration."
 
-      - name: Register Base database package candidate
+      - name: Resolve authoritative Base database package
         id: database-package
         working-directory: base-source
         shell: bash
         env:
           LICENSE_MASTER_API_TOKEN: ${{ secrets.LICENSE_MASTER_API_TOKEN }}
-          SOURCE_REPO: ${{ inputs.source_repo }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_DATABASE_SOURCE_COMMIT: ${{ inputs.database_source_commit }}
         run: |
           set -euo pipefail
           test -n "$LICENSE_MASTER_API_TOKEN" || { echo "::error::Missing LICENSE_MASTER_API_TOKEN in Dev Panel repository secrets"; exit 1; }
           node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
-          test -f tools/build-database-package.mjs || { echo "::error::Base source is missing tools/build-database-package.mjs"; exit 1; }
-          schema_version="$(jq -r '.schemaVersion // empty' release-package/database-schema.json)"
-          test -n "$schema_version" || { echo "::error::Generated Base database schema version is missing."; exit 1; }
-          node tools/build-database-package.mjs \
-            --commit "$SOURCE_SHA" \
-            --schema-version "$schema_version" \
-            --snapshot supabase/customer-schema.sql \
-            --metadata release-package/database-schema.json \
-            --output release-package/base-database-package.json
-          test -s release-package/base-database-package.json
-          test "$(jq -r '.sourceRepo // empty' release-package/base-database-package.json)" = "$SOURCE_REPO" || {
-            echo "::error::Base database package source repository does not match the active Base source. Expected $SOURCE_REPO."
-            exit 1
-          }
-          response="$(curl --fail-with-body --silent --show-error -X POST "${LICENSE_MASTER_URL%/}/database-packages" \
+          response_file="$(mktemp)"
+          status="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --get "${LICENSE_MASTER_URL%/}/database-packages/resolve" \
             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-binary @release-package/base-database-package.json)"
-          test "$(jq -r '.package.sourceRepo // empty' <<<"$response")" = "$SOURCE_REPO" || { echo "::error::License Manager registered the Base database package against the wrong source repository."; exit 1; }
-          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceRepo:.package.sourceRepo,sourceCommit:.package.sourceCommit}' <<<"$response")"
-          test "$(jq -r '.component' <<<"$reference")" = "base" || { echo "::error::License Manager returned a non-Base database package."; exit 1; }
-          test "$(jq -r '.sourceCommit' <<<"$reference")" = "$SOURCE_SHA" || { echo "::error::Base database package source commit does not match the release source."; exit 1; }
-          test "$(jq -r '.databaseSchemaVersion' <<<"$reference")" = "$schema_version" || { echo "::error::Base database package schema version does not match the release schema version."; exit 1; }
+            --data-urlencode "components=base")"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            error_code="$(jq -r '.code // .error // .message // "unknown"' "$response_file" 2>/dev/null || true)"
+            rm -f "$response_file"
+            echo "::error::License Manager cannot resolve a validated Base database package (HTTP $status): $error_code"
+            echo "::error::Build and validate the Base database package through the central database manual release flow first."
+            exit 1
+          fi
+          reference="$(jq -ec '.packages | if length==1 then .[0] else error("Expected exactly one Base database package") end | {id,component,databaseSchemaVersion,sha256,sourceRepo,sourceCommit,status,resolutionSource}' "$response_file")"
+          rm -f "$response_file"
+          test "$(jq -r '.component' <<<"$reference")" = "base" || { echo "::error::Resolved package is not Base."; exit 1; }
+          test "$(jq -r '.sourceRepo' <<<"$reference")" = "lucaskerim123/Master-Database-System" || { echo "::error::No validated central Base database package is available. Do not register legacy Base-source packages."; exit 1; }
+          test "$(jq -r '.status' <<<"$reference")" = "current" || { echo "::error::Central Base database package must be current before release packaging."; exit 1; }
           jq -e '.id|type=="string" and length>0' <<<"$reference" >/dev/null
           jq -e '.sha256|test("^[a-f0-9]{64}$")' <<<"$reference" >/dev/null
+          jq -e '.sourceCommit|test("^[a-f0-9]{40}$")' <<<"$reference" >/dev/null
+          if [ -n "$EXPECTED_DATABASE_SOURCE_COMMIT" ] && [ "$(jq -r '.sourceCommit' <<<"$reference")" != "$EXPECTED_DATABASE_SOURCE_COMMIT" ]; then
+            echo "::error::Central Base database package source commit changed after inspection. Re-inspect the package in Dev Panel."
+            exit 1
+          fi
+          echo "Using License Manager validated central Base database package (no database package created or published by this workflow)."
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
 
       - name: Build release information
