@@ -220,7 +220,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         if(!known.has(recordIdentity(record))){additions.push(record);known.add(recordIdentity(record));}
       }
       if(additions.length)await onPersist([...additions,...records]);
-      setNotice(additions.length+" exact Production key names added as blank encrypted Vault records. Protected values were not accessed. No Vercel variables were changed.");
+      setNotice(additions.length+" Production names pulled into the encrypted Vault as blank references. No Vercel variables were created, overwritten or deleted.");
     });
   }
   return <section className="orbit-panel p-4 space-y-4">
@@ -262,9 +262,9 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       </div>
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importNamesOnly()}>
-          <ArrowDownToLine size={14}/> Import exact names only (blank values)
+          <ArrowDownToLine size={14}/> Pull / Sync Production names (read-only)
         </button>
-        <span className="text-xs text-muted-foreground">Reads project metadata, never secrets; also works for Sensitive variables.</span>
+        <span className="text-xs text-muted-foreground">Pulls names only, including Sensitive variables. Existing values remain in Vercel. Readable Config values may be imported individually below.</span>
       </div>
       {missingReferences.length>0&&<details className="rounded border p-3 space-y-2">
         <summary className="cursor-pointer text-xs font-semibold">{vaultSystemLabel(systemForProject(project.name))} · {account==="main"?"Main":"Fallback"} · {missingReferences.length} reference names not yet saved (optional)</summary>
