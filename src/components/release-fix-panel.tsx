@@ -1,6 +1,6 @@
 import {useEffect,useState} from "react";
 import {AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,Loader2,RefreshCw,ShieldCheck,Terminal,Wrench} from "lucide-react";
-import {dispatchAiSourceValidation,getReleaseFixPreview} from "@/lib/ai-repair.server";
+import {dispatchAiSourceValidation,getReleaseFixPreview,requestAiRepairRunDiagnosis} from "@/lib/ai-repair.server";
 
 function repositoryFromRunUrl(url:string){
  const match=String(url||"").match(/^https:\/\/github\.com\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)\/actions\/runs\/\d+(?:\/.*)?$/);
@@ -60,6 +60,16 @@ export function ReleaseFixPanel({session,type,draft,attempt,runRepo,compact=fals
  async function copy(){
   try{await navigator.clipboard.writeText(report);setCopied(true);setTimeout(()=>setCopied(false),1800)}catch{setError("Could not copy the repair report")}
  }
+ async function requestRepair(){
+  if(!repo||!runId)return;
+  if(!window.confirm("Send this failed release run to AI Repair for an OpenRouter free-model diagnosis? This will save a proposed repair, but not change source, GitHub secrets, SQL or deployment."))return;
+  setBusy("repair");setError("");
+  try{
+   const result=await requestAiRepairRunDiagnosis({data:{token:session.token,repo,runId,confirm:"REQUEST_AI_REPAIR"}});
+   setDispatch({workerUrl:result.workerUrl,repair:true});
+  }catch(e:any){setError(e.message||"Repair request failed")}
+  finally{setBusy("")}
+ }
  async function validateSource(){
   if(!preview?.sha||!preview?.repo)return;
   if(!window.confirm("Start manual GitHub Actions checks against the exact source commit? This does not apply a fix or publish."))return;
@@ -79,11 +89,12 @@ export function ReleaseFixPanel({session,type,draft,attempt,runRepo,compact=fals
    {preview?.savedAi?.incident?.sqlstate&&<p className="text-xs font-medium">SQLSTATE: {preview.savedAi.incident.sqlstate}</p>}{preview?.savedAi?.proposal?.sqlForwardMigration&&<details className="rounded-md border border-border p-3"><summary className="cursor-pointer text-xs font-semibold">Proposed SQL forward migration — review required</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">{preview.savedAi.proposal.sqlForwardMigration}</pre><p className="mt-2 text-[11px] text-muted-foreground">Proposal only. Not executed against any database. Validate in an isolated PostgreSQL environment before approval.</p></details>}{preview?.logError&&<p className="text-xs text-muted-foreground">{preview.logError}</p>}
    {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
    <div className="flex flex-wrap gap-2">
+    <button type="button" className="button-primary inline-flex items-center gap-1" disabled={Boolean(busy)||!repo||!runId} onClick={()=>void requestRepair()}><Wrench size={13}/>{busy==="repair"?"Sending…":"Send to AI Repair"}</button>
     <button type="button" className="button-secondary inline-flex items-center gap-1" onClick={()=>void copy()}><Clipboard size={13}/>{copied?"Copied":"Copy repair to ChatGPT"}</button>
     <button type="button" className="button-secondary inline-flex items-center gap-1" onClick={()=>void validateSource()} disabled={Boolean(busy)||!preview?.sha||type==="base"&&preview?.repo?.endsWith("OrbitFS-Control-Centre")}><Terminal size={13}/>{busy?"Starting checks…":"Validate source"}</button>
     {(preview?.runUrl||draft?.last_run_url)&&<a className="button-secondary inline-flex items-center gap-1" href={preview?.runUrl||draft?.last_run_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/> GitHub run</a>}
    </div>
-   {dispatch&&<div className="rounded-lg border border-border p-3 text-xs"><span className="inline-flex items-center gap-2"><CheckCircle2 size={14}/> Source validation queued.</span> <a href={dispatch.workerUrl} target="_blank" rel="noreferrer" className="underline">View GitHub Actions</a></div>}
+   {dispatch&&<div className="rounded-lg border border-border p-3 text-xs"><span className="inline-flex items-center gap-2"><CheckCircle2 size={14}/> {dispatch.repair?"AI Repair diagnosis requested.":"Source validation queued."}</span> <a href={dispatch.workerUrl} target="_blank" rel="noreferrer" className="underline">View GitHub Actions</a></div>}
    <p className="text-[11px] text-muted-foreground">Initial rule-based diagnosis uses no OpenRouter calls. When configured, the saved OpenRouter solution is retrieved from the dedicated repair database. Fix never silently edits source or SQL, reruns a release or bypasses approvals.</p>
   </div>}
  </section>;
