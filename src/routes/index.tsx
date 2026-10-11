@@ -43,6 +43,7 @@ function Index() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
+  const [releaseAutoRefresh,setReleaseAutoRefresh]=useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [masterConnected, setMasterConnected] = useState(false);
@@ -199,9 +200,9 @@ function Index() {
     };
     // Even completed runs need one fetch after refresh to restore jobs and final logs.
     void poll();
-    if (!completedAlready) timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
+    if (!completedAlready && releaseAutoRefresh && (tab==="base"||tab==="engine")) timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 20000);
     return () => { stopped = true; if(timer)clearInterval(timer); };
-  }, [run?.id, runRepo, session?.token]);
+  }, [run?.id, runRepo, session?.token, releaseAutoRefresh, tab]);
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session || !runVersion) return;
@@ -440,11 +441,11 @@ function Index() {
             {tab === "base" && <Composer key={"base-"+releasePageEpoch} type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("base")} onStart={(options:any) => start("base",options)} run={runRepo === (data.base.repositories?.base?.workerRepo || "") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("base",d,a)} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              onInspect={() => inspect("base")} onStart={(options:any) => start("base",options)} run={runRepo === (data.base.repositories?.base?.workerRepo || "") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("base",d,a)} autoRefreshRuns={releaseAutoRefresh} setAutoRefreshRuns={setReleaseAutoRefresh} onRefreshRun={async()=>{if(!run?.id||!runRepo)return;const result=await getReleaseRun({data:{token:session.token,repo:runRepo,runId:run.id}});setRun((previous:any)=>({...previous,...result.run,jobs:result.jobs||[],failure:result.failure||null}));if(result.run?.status==="completed")await load(session,true)}} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "engine" && <Composer key={"engine-"+releasePageEpoch} type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={Boolean(data.engine.repositories?.engine?.repo)&&runRepo === data.engine.repositories.engine.repo ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={Boolean(data.engine.repositories?.engine?.repo)&&runRepo === data.engine.repositories.engine.repo ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} autoRefreshRuns={releaseAutoRefresh} setAutoRefreshRuns={setReleaseAutoRefresh} onRefreshRun={async()=>{if(!run?.id||!runRepo)return;const result=await getReleaseRun({data:{token:session.token,repo:runRepo,runId:run.id}});setRun((previous:any)=>({...previous,...result.run,jobs:result.jobs||[],failure:result.failure||null}));if(result.run?.status==="completed")await load(session,true)}} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
             {tab === "ai-repair" && <AiRepairWorkspace session={session} />}
