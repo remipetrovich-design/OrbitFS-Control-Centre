@@ -1,8 +1,8 @@
 import {useCallback,useEffect,useMemo,useState,type ReactNode} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,FileCode2,Github,Loader2,RefreshCw,Search,ShieldCheck,Terminal,Wrench, Zap} from "lucide-react";
-import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation,getAiRepairControls,saveAiRepairControls,requestAiRepairWorkerCheck} from "@/lib/ai-repair.server";
+import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation,getAiRepairControls,saveAiRepairControls,requestAiRepairWorkerCheck,archiveAiRepairIncident} from "@/lib/ai-repair.server";
 
-type RepairPolicy={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string};
+type RepairPolicy={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
 type Section="overview"|"incidents"|"workspace"|"history"|"recovery"|"settings";
 const SECTIONS:[Section,string][]=[["overview","Overview"],["incidents","Incidents"],["workspace","Repair workspace"],["history","Job history"],["recovery","Release recovery"],["settings","Settings"]];
 function date(v?:string){return v?new Date(v).toLocaleString():"—"}
@@ -17,6 +17,7 @@ export function AiRepairWorkspace({session}:{session:any}){
  const [overview,setOverview]=useState<any>(null);
  const [service,setService]=useState<any>(null);
  const [incidents,setIncidents]=useState<any[]>([]);
+ const [archivedRuns,setArchivedRuns]=useState<any[]>([]);
  const [selected,setSelected]=useState<any>(null);
  const [detail,setDetail]=useState<any>(null);
  const [incidentDetail,setIncidentDetail]=useState<any>(null);
@@ -34,16 +35,16 @@ export function AiRepairWorkspace({session}:{session:any}){
   try{
    const [o,s]=await Promise.all([getAiRepairOverview({data:{token}}),getAiRepairServiceState({data:{token}})]);
    setOverview(o);setService(s);
-   if(s.available||s.historyAvailable){try{const r=await getAiRepairIncidents({data:{token}});setIncidents(r.incidents||[]);}catch(e:any){setError(e.message||"Cannot load incident storage")}}
+   if(s.available||s.historyAvailable){try{const r=await getAiRepairIncidents({data:{token}});setIncidents(r.incidents||[]);setArchivedRuns(r.archivedRuns||[]);}catch(e:any){setError(e.message||"Cannot load incident storage")}}
   }catch(e:any){setError(e.message||"Failed to load AI Repair Centre")}
   finally{setBusy("")}
  },[token]);
  useEffect(()=>{void load();const interval=setInterval(()=>{if(document.visibilityState==="visible")void load()},60000);return ()=>clearInterval(interval)},[load]);
  const runs=useMemo(()=>overview?.groups?.flatMap((g:any)=>g.runs||[])||[],[overview]);
  const rows=useMemo(()=>{
-  const combined=[...incidents.map((i:any)=>({...i,kind:i.kind||(i.repo?.toLowerCase().includes("engine")?"engine":"base"),origin:"stored"})),...runs.filter((r:any)=>!incidents.some((i:any)=>i.repo===r.repo&&i.runId===r.id)).map((r:any)=>({...r,runId:r.id,origin:"github",status:"detected"}))];
+  const combined=[...incidents.map((i:any)=>({...i,kind:i.kind||(i.repo?.toLowerCase().includes("engine")?"engine":"base"),origin:"stored"})),...runs.filter((r:any)=>policy?.show_github_failures!==false&&!incidents.some((i:any)=>i.repo===r.repo&&i.runId===r.id)&&!archivedRuns.some((i:any)=>i.repo===r.repo&&i.runId===r.id)).map((r:any)=>({...r,runId:r.id,origin:"github",status:"detected"}))];
   return combined.filter((r:any)=>(kind==="all"||r.kind===kind)&&[r.repo,r.name,r.workflow,r.jobName,r.classification,r.runId].join(" ").toLowerCase().includes(query.toLowerCase())).sort((a:any,b:any)=>new Date(b.detectedAt||b.createdAt||0).getTime()-new Date(a.detectedAt||a.createdAt||0).getTime());
- },[incidents,runs,query,kind]);
+ },[incidents,runs,query,kind,policy,archivedRuns]);
  async function open(item:any){
   setSelected(item);setDetail(null);setIncidentDetail(null);setProposal(null);setValidation(null);setLog("");setError("");setSection("workspace");setBusy("detail");
   try{
@@ -95,6 +96,20 @@ export function AiRepairWorkspace({session}:{session:any}){
   catch(e:any){setError(e.message||"Policy save failed")}
   finally{setBusy("")}
  }
+ async function deleteIncident(item:any){
+  if(item.origin!=="stored")return;
+  if(!window.confirm("Delete this incident from the Repair Centre view? GitHub runs are not deleted. Audit history and AI usage safeguards remain."))return;
+  setBusy("delete-incident");setError("");
+  try{
+   const result=await archiveAiRepairIncident({data:{token,incidentId:item.id,confirm:"DELETE_FROM_REPAIR_CENTRE"}});
+   if(!result.deleted)throw Error("Incident already removed or no longer available for this profile");
+   setIncidents(rows=>rows.filter(x=>x.id!==item.id));
+   setArchivedRuns(old=>[...old,{repo:item.repo,runId:item.runId}]);
+   if(selected?.id===item.id){setSelected(null);setIncidentDetail(null);setSection("incidents")}
+   setNotice("Incident removed from Repair Centre history. GitHub and audit records were preserved.");
+  }catch(e:any){setError(e.message||"Could not delete incident")}
+  finally{setBusy("")}
+ }
  async function workerCheck(){
   setBusy("worker-check");setError("");
   try{const result=await requestAiRepairWorkerCheck({data:{token,verifyOnly:true}});setNotice("Read-only worker verification dispatched for "+result.profile)}
@@ -126,7 +141,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   {(section==="overview"||section==="incidents"||section==="history")&&<>
    <div className="flex flex-wrap items-center gap-2"><div className="relative min-w-[220px] flex-1"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15}/><input className="control w-full pl-9" placeholder="Search failures, repository, run…" value={query} onChange={e=>setQuery(e.target.value)}/></div><select className="control max-w-[150px]" value={kind} onChange={e=>setKind(e.target.value)}><option value="all">All systems</option><option value="base">Base</option><option value="engine">Engine</option></select><Pill label={total+" results"}/></div>
    {overview?.groups?.some((g:any)=>g.error)&&<Card title="Connection warnings">{overview.groups.filter((g:any)=>g.error).map((g:any)=><p key={g.repo} className="text-xs text-muted-foreground">{g.repo}: {g.error}</p>)}</Card>}
-   <div className="overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">System / Source</th><th className="p-3">Failure</th><th className="p-3">Status</th><th className="p-3">Detected</th><th className="p-3">Action</th></tr></thead><tbody>{rows.map((r:any)=><tr key={r.origin+":"+r.repo+":"+(r.id||r.runId)+":"+(r.jobId||"")} className="border-t border-border"><td className="p-3"><b className="uppercase">{r.kind}</b><p className="max-w-[260px] truncate text-muted-foreground">{r.repo}</p><p className="text-muted-foreground">{r.profile}</p></td><td className="p-3"><b>{r.jobName||r.name||r.workflow||"Failed workflow"}</b><p className="text-muted-foreground">Run #{r.runId}{r.jobId?" · Job #"+r.jobId:""}</p></td><td className="p-3"><Pill label={r.lastValidation?.status||r.ai?.status||r.status||"failed"} ok={r.lastValidation?.status==="validated"}/></td><td className="p-3">{date(r.detectedAt||r.createdAt)}</td><td className="p-3"><button className="button-secondary" onClick={()=>void open(r)}>Investigate</button></td></tr>)}</tbody></table>{!rows.length&&<div className="p-8 text-center text-sm text-muted-foreground">No matching failed jobs. Refresh or check your profile and GitHub connections.</div>}</div>
+   <div className="overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">System / Source</th><th className="p-3">Failure</th><th className="p-3">Status</th><th className="p-3">Detected</th><th className="p-3">Action</th></tr></thead><tbody>{rows.map((r:any)=><tr key={r.origin+":"+r.repo+":"+(r.id||r.runId)+":"+(r.jobId||"")} className="border-t border-border"><td className="p-3"><b className="uppercase">{r.kind}</b><p className="max-w-[260px] truncate text-muted-foreground">{r.repo}</p><p className="text-muted-foreground">{r.profile}</p></td><td className="p-3"><b>{r.jobName||r.name||r.workflow||"Failed workflow"}</b><p className="text-muted-foreground">Run #{r.runId}{r.jobId?" · Job #"+r.jobId:""}</p></td><td className="p-3"><Pill label={r.lastValidation?.status||r.ai?.status||r.status||"failed"} ok={r.lastValidation?.status==="validated"}/></td><td className="p-3">{date(r.detectedAt||r.createdAt)}</td><td className="p-3"><div className="flex items-center gap-2"><button className="button-secondary" onClick={()=>void open(r)}>Investigate</button>{r.origin==="stored"&&<button type="button" className="button-secondary text-destructive" disabled={Boolean(busy)} onClick={()=>void deleteIncident(r)} title="Remove incident from Repair Centre (keeps GitHub and audit history)">Delete</button>}</div></td></tr>)}</tbody></table>{!rows.length&&<div className="p-8 text-center text-sm text-muted-foreground">No matching failed jobs. Refresh or check your profile and GitHub connections.</div>}</div>
   </>}
   {section==="workspace"&&<div className="space-y-3">
    {!selected?<Card title="Choose a failed job"><p className="text-sm text-muted-foreground">Open an incident from Overview or Incidents to inspect its errors and source.</p><button className="button-secondary" onClick={()=>setSection("incidents")}>Open incidents</button></Card>:<>
@@ -143,7 +158,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   {section==="recovery"&&<Card title="Release recovery"><p className="text-sm text-muted-foreground">Repair results must re-enter the existing GitHub release workflow, License Manager validation and technical approval. Billing final review and publication are always manual.</p><div className="flex flex-wrap gap-2"><Pill label="Automatic publication disabled" ok/><Pill label="Recovery dispatch not configured"/></div><p className="text-xs text-muted-foreground">No alternate release registry or approval state is created here.</p></Card>}
   {section==="settings"&&<div className="space-y-4">
    <Card title="Repair service and worker health">
-    <div className="flex flex-wrap items-center gap-2"><Pill label={controls?.connected?"Repair database connected":"Repair database disconnected"} ok={Boolean(controls?.connected)}/><Pill label={controls?.workerDispatchConfigured?"GitHub worker dispatch connected":"Worker dispatch unavailable"} ok={Boolean(controls?.workerDispatchConfigured)}/><Pill label={current?.profile==="primary"?"MAIN selected":"FALLBACK selected"}/></div>
+    <div className="flex flex-wrap items-center gap-2"><Pill label={controls?.connected?"Repair database connected":"Repair database disconnected"} ok={Boolean(controls?.connected)}/><Pill label={controls?.workerDispatchConfigured?"GitHub dispatch token available":"GitHub dispatch token missing"} ok={Boolean(controls?.workerDispatchConfigured)}/><Pill label={current?.profile==="primary"?"MAIN selected":"FALLBACK selected"}/></div>
     <p className="text-xs text-muted-foreground">{controls?.connected?"This Dev Panel can read/write repair settings and history. GitHub Actions runs the separate scheduled scanner.":"This Dev Panel is missing the server-side Supabase service credential. GitHub Actions has its own credential and may operate independently."}</p>
     <p className="text-xs text-muted-foreground">Supabase project: orbitfs-ai-repair · ffmfogljikvybzgunauo. Never place service keys in the browser or public environment variables.</p>
     <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" disabled={Boolean(busy)} onClick={()=>void loadControls()}><RefreshCw size={14}/> Test and refresh connection</button><button type="button" className="button-secondary" disabled={Boolean(busy)||!controls?.workerDispatchConfigured} onClick={()=>void workerCheck()}><Terminal size={14}/> Run read-only worker check</button><a className="button-secondary" target="_blank" rel="noreferrer" href="https://github.com/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml">Worker runs <ExternalLink size={13}/></a></div>
@@ -153,9 +168,11 @@ export function AiRepairWorkspace({session}:{session:any}){
     <p className="text-xs text-muted-foreground">Settings are saved per profile. Changes here affect <b>{controls?.profile||"the active profile"}</b> only. Switching the authoritative License Manager profile retains the other profile's settings and history. No release approval authority is changed.</p>
     {!policy?<p className="text-sm text-muted-foreground">Policy unavailable until this Dev Panel has access to the dedicated Supabase project.</p>:<>
      <div className="grid gap-3 sm:grid-cols-2">
-      {([["enabled","Enable repair monitoring"],["auto_diagnose","Automatically diagnose new failures"],["enable_base","Monitor Base releases"],["enable_engine","Monitor Update/Engine releases"],["enable_release_worker","Include Dev Panel Base build worker"],["enable_sql_diagnosis","Allow SQL diagnosis proposals"]] as [keyof RepairPolicy,string][]).map(([key,label])=><label key={key} className="flex cursor-pointer items-center gap-2 rounded-md border border-border p-3 text-xs"><input type="checkbox" checked={Boolean(policy[key])} onChange={e=>setPolicy((p:any)=>({...p,[key]:e.target.checked}))}/>{label}</label>)}
+      {([["enabled","Enable repair monitoring"],["auto_diagnose","Automatically diagnose new failures"],["enable_base","Monitor Base releases"],["enable_engine","Monitor Update/Engine releases"],["enable_release_worker","Include Dev Panel Base build worker"],["enable_sql_diagnosis","Allow SQL diagnosis proposals"],["show_github_failures","Display unsaved GitHub failures"]] as [keyof RepairPolicy,string][]).map(([key,label])=><label key={key} className="flex cursor-pointer items-center gap-2 rounded-md border border-border p-3 text-xs"><input type="checkbox" checked={Boolean(policy[key])} onChange={e=>setPolicy((p:any)=>({...p,[key]:e.target.checked}))}/>{label}</label>)}
       <label className="text-xs">Lookback window (hours, 1–24)<input className="control mt-1 w-full" type="number" min={1} max={24} value={policy.lookback_hours} onChange={e=>setPolicy((p:any)=>({...p,lookback_hours:Number(e.target.value)}))}/></label>
       <label className="text-xs">OpenRouter daily limit (1–5, shared across both profiles)<input className="control mt-1 w-full" type="number" min={1} max={5} value={policy.daily_ai_limit} onChange={e=>setPolicy((p:any)=>({...p,daily_ai_limit:Number(e.target.value)}))}/></label>
+      <label className="text-xs">Auto-archive incidents after days (0 disables)<input className="control mt-1 w-full" type="number" min={0} max={365} value={policy.auto_archive_days} onChange={e=>setPolicy((p:any)=>({...p,auto_archive_days:Number(e.target.value)}))}/></label>
+      <label className="text-xs">Incidents per page (20–300)<input className="control mt-1 w-full" type="number" min={20} max={300} value={policy.incident_page_size} onChange={e=>setPolicy((p:any)=>({...p,incident_page_size:Number(e.target.value)}))}/></label>
       <label className="text-xs sm:col-span-2">Free OpenRouter model ID<input className="control mt-1 w-full" value={policy.model} onChange={e=>setPolicy((p:any)=>({...p,model:e.target.value}))}/></label>
      </div>
      <p className="text-xs text-muted-foreground">The worker enforces these controls on its next scheduled run. Free models only; no source editing, automatic SQL execution, deployment, licence approval or customer publication.</p>
