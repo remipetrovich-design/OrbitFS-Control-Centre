@@ -124,14 +124,14 @@ export const importVaultVercelConfig = createServerFn({method:"POST"}).handler(
     const item = envs.find(row => row.id === data.envId);
     if (!item || item.updatedAt !== data.expectedUpdatedAt)
       throw new Error("Vercel variable changed since comparison. Refresh before importing.");
-    if (item.visibility !== "config" || item.type === "sensitive" || planProductionKey(envs,item.key).action !== "replace")
-      throw new Error("Only readable, Production-only Vercel Config variables can be imported.");
+    if (["sensitive","secret"].includes(item.type) || item.visibility==="secret" || planProductionKey(envs,item.key).action !== "replace")
+      throw new Error("Vercel marks this variable as write-only or the Production key is ambiguous.");
     const response = await vercelApi<any>(
       "/v1/projects/" + encodeURIComponent(data.projectId) + "/env/" + encodeURIComponent(item.id) + scope(data.teamId),
       data.vercelToken
     );
     if (response?.decrypted !== true || typeof response?.value !== "string" || !response.value.length)
-      throw new Error("Vercel does not permit retrieval of this value.");
+      throw new Error("Vercel did not return a readable decrypted value for this variable.");
     return {key: item.key, value: response.value, source: "Vercel Production" as const};
   }
 );
