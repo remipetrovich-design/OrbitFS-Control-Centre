@@ -63,7 +63,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
   const groupedVisibleEntries=groupVaultItems(visibleEntries,item=>item.row);
   const eligible = useMemo(()=>entries.filter(entry=>entry.assessment.status==="ready").map(entry=>entry.row),[entries]);
   const missingReferences=useMemo(()=>project ? suggestUnsavedVercelKeys(records,project.name,inspected?envs.map(x=>x.key):[]) : [],[records,project,inspected,envs]);
-  const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
+  const availableConfigs = inspected ? envs.filter(row=>!["sensitive","secret"].includes(row.type) && row.visibility !== "secret" && planProductionKey(envs,row.key).action==="replace") : [];
   const connectionStatus = tokenRow?.secret ? "Token saved in Vault · not yet verified" : "Not connected · add an account API token";
   function clearReview() {setReview([]);setAck(false);}
   function switchAccount(next:Account) {
@@ -377,7 +377,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       </div>}
       <div className="border-t pt-3 space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold"><ArrowDownToLine size={15}/> Vercel → Vault</div>
-        <p className="text-xs text-muted-foreground">Pull readable Config values into the matching Vault entry for this exact account, project and key. Sensitive and Secret values cannot be retrieved. No Vercel variables are changed.</p>
+        <p className="text-xs text-muted-foreground">Pull readable Config and legacy encrypted values into the matching Vault entry for this exact account, project and key. Values Vercel marks Sensitive or Secret cannot be retrieved. No Vercel variables are changed.</p>
         <fieldset className="flex flex-wrap gap-4 text-xs"><legend className="font-semibold">When a Vault value already exists</legend>
           <label className="flex items-center gap-2"><input type="radio" checked={pullConflictMode==="skip"} onChange={()=>setPullConflictMode("skip")}/> Skip existing (keep Vault value)</label>
           <label className="flex items-center gap-2"><input type="radio" checked={pullConflictMode==="override"} onChange={()=>setPullConflictMode("override")}/> Override existing (replace Vault value from Vercel)</label>
@@ -387,7 +387,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
             <div><strong className="font-mono">{row.key}</strong><span className="block text-muted-foreground">From: {account} / {project.name} / Production</span></div>
             <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importConfig(row)}>Pull value into Vault</button>
           </div>)}
-          {!availableConfigs.length&&<p className="text-xs text-muted-foreground">No readable Production-only Config values available to import.</p>}
+          {!availableConfigs.length&&<p className="text-xs text-muted-foreground">No potentially readable Production values available to import.</p>}
         </div>
       </div>
     </div>}
