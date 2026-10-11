@@ -199,3 +199,64 @@ export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async(
  const solution=stored?.diagnosis?{category:stored.incident.classification,title:stored.diagnosis.summary,suggestion:stored.diagnosis.recommendation,confidence:"AI · "+stored.diagnosis.confidence,aiRequests:0}:explainReleaseFailure(log,failedSteps);
  return {savedAi:stored,repo:data.repo,profile:selection.profile,type,runId:Number(id),jobId:job?.id||null,sha:String(run.head_sha||""),runUrl:run.html_url||null,status:run.status,conclusion:run.conclusion,failedSteps,log,logError,solution,ready:run.conclusion==="failure"||run.conclusion==="cancelled",checkedAt:new Date().toISOString()};
 });
+
+
+type RepairSettings={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string};
+const REPAIR_SETTINGS_FIELDS=["enabled","auto_diagnose","enable_base","enable_engine","enable_release_worker","enable_sql_diagnosis"] as const;
+function repairDbKey(){return String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"").trim();}
+async function repairDbRead(path:string,options?:{method:"GET"|"POST";body?:object}){
+ const key=repairDbKey();
+ if(!key)throw Error("Dev Panel database connection missing. Configure REPAIR_SUPABASE_SERVICE_ROLE_KEY in this deployment.");
+ const response=await fetch("https://ffmfogljikvybzgunauo.supabase.co/rest/v1/"+path,{
+  method:options?.method||"GET",headers:{apikey:key,Authorization:"Bearer "+key,Accept:"application/json","Content-Type":"application/json"},
+  body:options?.body?JSON.stringify(options.body):undefined,cache:"no-store",signal:AbortSignal.timeout(8000)
+ });
+ if(!response.ok)throw Error("Repair database request failed: HTTP "+response.status);
+ return response.status===204?null:await response.json();
+}
+async function repairSettings(){
+ const activeProfile=(await active()).profile==="primary"?"main":"fallback";
+ const rows=await repairDbRead("repair_settings?profile=eq."+activeProfile+"&limit=1");
+ return {profile:activeProfile,settings:rows?.[0]||null};
+}
+export const getAiRepairControls=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOwner(data.token);
+ const selection=await active();
+ const profile=selection.profile==="primary"?"main":"fallback";
+ const connected=Boolean(repairDbKey());
+ if(!connected)return {profile,connected:false,settings:null,counts:null,workerDispatchConfigured:Boolean(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN),message:"Set the Dev Panel server-side REPAIR_SUPABASE_SERVICE_ROLE_KEY on the correct Vercel project."};
+ const [{settings},usage,incidents]=await Promise.all([
+  repairSettings(),
+  repairDbRead("repair_ai_usage?select=id&usage_day=eq."+new Date().toISOString().slice(0,10)),
+  repairDbRead("repair_incidents?select=id&profile=eq."+profile)
+ ]);
+ return {profile,connected:true,settings,counts:{aiUsedToday:usage.length,storedIncidents:incidents.length},workerDispatchConfigured:Boolean(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN)};
+});
+export const saveAiRepairControls=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;settings:RepairSettings}})=>{
+ requireOwner(data.token);
+ const profile=(await active()).profile==="primary"?"main":"fallback";
+ const input=data.settings;
+ if(!input||typeof input!=="object")throw Error("Invalid settings");
+ const cleaned:Record<string,boolean|number|string>={};
+ for(const field of REPAIR_SETTINGS_FIELDS){if(typeof input[field]!=="boolean")throw Error("Invalid "+field);cleaned[field]=input[field];}
+ if(!Number.isInteger(input.lookback_hours)||input.lookback_hours<1||input.lookback_hours>24)throw Error("Lookback must be 1–24 hours");
+ if(!Number.isInteger(input.daily_ai_limit)||input.daily_ai_limit<1||input.daily_ai_limit>5)throw Error("Daily AI limit must be 1–5");
+ const model=String(input.model||"");
+ if(model!=="openrouter/free"&&!/^[a-zA-Z0-9._/-]+:free$/.test(model))throw Error("Only OpenRouter free models allowed");
+ cleaned.lookback_hours=input.lookback_hours;cleaned.daily_ai_limit=input.daily_ai_limit;cleaned.model=model;
+ const saved=await repairDbRead("rpc/repair_update_settings",{method:"POST",body:{p_profile:profile,p_settings:cleaned}});
+ return {profile,settings:saved,updated:true};
+});
+export const requestAiRepairWorkerCheck=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;verifyOnly:boolean}})=>{
+ requireOwner(data.token);
+ const selection=await active();
+ if(data.verifyOnly!==true)throw Error("Only read-only worker verification can be dispatched here");
+ const token=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ if(!token)throw Error("AI_REPAIR_WORKER_GITHUB_TOKEN is not configured on this Dev Panel server");
+ const response=await fetch("https://api.github.com/repos/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml/dispatches",{
+  method:"POST",headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
+  body:JSON.stringify({ref:"main",inputs:{verify_only:true}}),signal:timeout()
+ });
+ if(!response.ok)throw Error("Verification dispatch failed: HTTP "+response.status);
+ return {dispatched:true,url:"https://github.com/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml",profile:selection.profile};
+});
