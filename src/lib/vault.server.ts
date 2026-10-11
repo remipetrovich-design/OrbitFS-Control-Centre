@@ -58,3 +58,28 @@ export const saveVaultEnvelope=createServerFn({method:"POST"}).handler(async({da
   if(error)throw new Error("Unable to save encrypted Vault");
   return {ok:true,updatedAt:saved.updated_at};
 });
+
+/** Deletes only the current Dev Panel's encrypted Vault payload. Provider credentials and
+ * unrelated tables are not modified. Requires an authenticated Owner/Admin and an explicit
+ * confirmation from the unlocked Vault UI. */
+export const clearVaultEnvelope=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;confirmation:string;expectedUpdatedAt:string}})=>{
+  requireVaultUser(data.token);
+  if(data.confirmation!=="CLEAR VAULT")throw new Error("Enter CLEAR VAULT to confirm.");
+  if(!data.expectedUpdatedAt||!Number.isFinite(Date.parse(data.expectedUpdatedAt)))
+    throw new Error("Reload and unlock the Vault before clearing.");
+  const client=db();
+  const {data:current,error:loadError}=await client.from("dev_panel_vault")
+    .select("updated_at").eq("id",true).maybeSingle();
+  if(loadError)throw new Error("Could not verify the current Vault before clearing.");
+  if(!current)return {ok:true,cleared:true};
+  if(new Date(current.updated_at).getTime()!==new Date(data.expectedUpdatedAt).getTime())
+    throw new Error("The Vault changed since you unlocked it. Reload before clearing to protect newer entries.");
+  const {data:deleted,error:deleteError}=await client.from("dev_panel_vault")
+    .delete().eq("id",true).eq("updated_at",current.updated_at).select("id");
+  if(deleteError)throw new Error("Unable to clear the encrypted Vault.");
+  if(!deleted?.length)throw new Error("Vault changed while clearing. Reload and retry.");
+  const {data:remaining,error:verifyError}=await client.from("dev_panel_vault")
+    .select("id").eq("id",true).maybeSingle();
+  if(verifyError||remaining)throw new Error("Could not verify that the Vault was cleared.");
+  return {ok:true,cleared:true};
+});
