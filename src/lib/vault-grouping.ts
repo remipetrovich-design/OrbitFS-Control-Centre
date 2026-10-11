@@ -10,6 +10,7 @@ const systemLabels:Record<VaultSystem,string>={
   "Base System":"Base System",
   "Shared Engine":"Shared Engine (addons)",
   Dev:"Dev Panel",
+  "AI Repair Centre":"AI Repair Centre",
   Other:"Other"
 };
 export function vaultSystemLabel(system:VaultSystem):string {return systemLabels[system]}
