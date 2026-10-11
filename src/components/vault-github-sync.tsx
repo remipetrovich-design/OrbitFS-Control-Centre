@@ -160,14 +160,14 @@ export function VaultGithubSync({session,records,onPersist}:{
         const record:VaultRecord={
           id:crypto.randomUUID(),systems:[systemForProject(reviewedRepository.name)],
           otherSystem:"",service:"GitHub",customService:"",
-          keyName:item.name,secret:"",usedIn:[account],
+          keyName:item.name,secret:kind==="variable"?(item.value??""):"",usedIn:[account],
           destinationSystem:reviewedRepository.fullName,needsReview:false,
           githubTargets:[{account,repo:reviewedRepository.fullName,scope,kind,keyName:item.name}]
         };
         if(!saved.has(recordIdentity(record))){additions.push(record);saved.add(recordIdentity(record));}
       }
       if(additions.length)await onPersist([...additions,...records]);
-      setNotice(additions.length+" GitHub Actions names pulled into the encrypted Vault as blank references. Existing GitHub secrets and variables remain untouched; protected secret values cannot be retrieved.");
+      setNotice(additions.length+" GitHub Actions "+kind+" entries pulled into the encrypted Vault. "+(kind==="variable"?"Readable variable values were saved encrypted when returned by GitHub.":"Secret values cannot be retrieved and remain blank.")+" GitHub was not changed.");
     });
   }
   return <section className="orbit-panel min-w-0 max-w-full overflow-x-hidden p-4 space-y-4">
@@ -212,11 +212,11 @@ export function VaultGithubSync({session,records,onPersist}:{
         <RefreshCw size={14}/> Compare GitHub {scope} {kind}s</button>
       {inspected&&repository&&<div className="space-y-3">
         <p className="text-xs text-muted-foreground">{inventory.length} existing entries in {repository.fullName} /
-          {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. No values retrieved.
+          {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. {kind==="secret"?"Secret values cannot be retrieved.":"Readable variable values can be pulled into the encrypted Vault."}
           {kind==="variable"?" Warning: GitHub Actions variables are not secret and can be read by permitted users.":""}</p>
-        <p className="text-xs text-muted-foreground">Pull restores provider names to this Vault only. GitHub secret values cannot be retrieved. Sending and replacing require a separate review; no GitHub delete operation is provided.</p>
+        <p className="text-xs text-muted-foreground">Pull restores GitHub secret names with blank values, or GitHub Actions variables with readable values where returned. Sending/replacing requires a separate review. No GitHub delete operation is provided.</p>
         <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importActionsNames()}>
-          <RefreshCw size={14}/> Pull / Sync names from GitHub (read-only)
+          <RefreshCw size={14}/> Pull / Sync from GitHub (read-only)
         </button>
         <div className="max-h-72 overflow-auto space-y-1">{eligible.map(row=>{
           const key=keyOverrides[row.id]??suggestedDestination(row,repository);
