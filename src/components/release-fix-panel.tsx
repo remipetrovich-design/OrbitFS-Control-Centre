@@ -69,14 +69,14 @@ export function ReleaseFixPanel({session,type,draft,attempt,runRepo,compact=fals
  }
  return <section className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 sm:p-4" aria-label="Release repair">
   <div className="flex flex-wrap items-start justify-between gap-3">
-   <div className="min-w-0 flex-1"><p className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-destructive"><AlertTriangle size={13}/> Failed release · Repair available</p><h3 className="mt-1 text-sm font-semibold">{advice.title}</h3><p className="mt-1 text-xs text-muted-foreground">{advice.suggestion}</p></div>
+   <div className="min-w-0 flex-1"><p className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-destructive"><AlertTriangle size={13}/> Failed release · Repair available</p><h3 className="mt-1 text-sm font-semibold">{advice.title}</h3><p className="mt-1 text-xs text-muted-foreground">{advice.suggestion}</p>{preview?.savedAi?.diagnosis&&<p className="mt-2 text-[11px] font-semibold">Saved OpenRouter diagnosis · {preview.savedAi.diagnosis.confidence} confidence · no additional model call</p>}</div>
    <button type="button" className="button-primary inline-flex items-center gap-2" onClick={()=>setOpen(v=>!v)}><Wrench size={14}/> Fix <ChevronDown size={13} className={open?"rotate-180":""}/></button>
   </div>
   {!open&&preview?.checkedAt&&<p className="mt-2 text-[10px] text-muted-foreground">Job inspected · {new Date(preview.checkedAt).toLocaleString()} · Diagnosis uses no AI requests</p>}
   {open&&<div className="mt-4 space-y-3 border-t border-border pt-3">
    <div className="grid gap-2 text-xs sm:grid-cols-2"><div><span className="text-muted-foreground">Release</span><p>v{draft?.version} · {draft?.channel}</p></div><div><span className="text-muted-foreground">Source commit</span><p className="break-all font-mono">{preview?.sha||draft?.source_sha||"Unknown"}</p></div><div><span className="text-muted-foreground">Failed step</span><p>{preview?.failedSteps?.join(", ")||"See GitHub error log"}</p></div><div><span className="text-muted-foreground">Analysis</span><p>{preview?.solution?.confidence||"From saved failure"}</p></div></div>
    <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 text-[11px]">{preview?.log||sourceError||"No failure log saved"}</pre>
-   {preview?.logError&&<p className="text-xs text-muted-foreground">{preview.logError}</p>}
+   {preview?.savedAi?.incident?.sqlstate&&<p className="text-xs font-medium">SQLSTATE: {preview.savedAi.incident.sqlstate}</p>}{preview?.savedAi?.proposal?.sqlForwardMigration&&<details className="rounded-md border border-border p-3"><summary className="cursor-pointer text-xs font-semibold">Proposed SQL forward migration — review required</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">{preview.savedAi.proposal.sqlForwardMigration}</pre><p className="mt-2 text-[11px] text-muted-foreground">Proposal only. Not executed against any database. Validate in an isolated PostgreSQL environment before approval.</p></details>}{preview?.logError&&<p className="text-xs text-muted-foreground">{preview.logError}</p>}
    {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
    <div className="flex flex-wrap gap-2">
     <button type="button" className="button-secondary inline-flex items-center gap-1" onClick={()=>void copy()}><Clipboard size={13}/>{copied?"Copied":"Copy repair to ChatGPT"}</button>
@@ -84,7 +84,7 @@ export function ReleaseFixPanel({session,type,draft,attempt,runRepo,compact=fals
     {(preview?.runUrl||draft?.last_run_url)&&<a className="button-secondary inline-flex items-center gap-1" href={preview?.runUrl||draft?.last_run_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/> GitHub run</a>}
    </div>
    {dispatch&&<div className="rounded-lg border border-border p-3 text-xs"><span className="inline-flex items-center gap-2"><CheckCircle2 size={14}/> Source validation queued.</span> <a href={dispatch.workerUrl} target="_blank" rel="noreferrer" className="underline">View GitHub Actions</a></div>}
-   <p className="text-[11px] text-muted-foreground">This diagnosis is prepared automatically from GitHub without OpenRouter. Fix does not silently edit source, rerun a release or bypass approvals. AI source changes require a separately authorised repair execution path.</p>
+   <p className="text-[11px] text-muted-foreground">Initial rule-based diagnosis uses no OpenRouter calls. When configured, the saved OpenRouter solution is retrieved from the dedicated repair database. Fix never silently edits source or SQL, reruns a release or bypasses approvals.</p>
   </div>}
  </section>;
 }
