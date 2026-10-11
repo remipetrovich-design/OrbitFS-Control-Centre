@@ -110,13 +110,13 @@ export function VaultProviderRecovery({session,records,onPersist}:{
           done+=provider==="GitHub"?TARGETS[mode].github.length*4:TARGETS[mode].vercel.length;
           update();continue;
         }
-        accountConnection(all,keyFor(provider,mode),token,mode,provider);
         if(provider==="GitHub"){
           let available:string[]=[];
           step=name+" · verifying GitHub repositories";update();
           try{
             const res=await listVaultGithubRepositories({data:{token:session.token,githubToken:token,account:mode}});
             available=res.repositories.map(x=>x.fullName);
+            accountConnection(all,keyFor(provider,mode),token,mode,provider);
           }catch(e){
             warning(name,e);done+=TARGETS[mode].github.length*4;update();continue;
           }
@@ -149,12 +149,13 @@ export function VaultProviderRecovery({session,records,onPersist}:{
           }
         }else{
           const teamId=teams[mode].trim()||TARGETS[mode].teamId;
-          accountConnection(all,teamKey(mode),teamId,mode,"Vercel");
           let available:Array<{id:string;name:string}>=[];
           step=name+" · verifying Vercel team and projects";update();
           try{
             const res=await listVaultVercelProjects({data:{token:session.token,vercelToken:token,teamId}});
             available=res.projects;
+            accountConnection(all,keyFor(provider,mode),token,mode,provider);
+            accountConnection(all,teamKey(mode),teamId,mode,"Vercel");
           }catch(e){
             warning(name,e);done+=TARGETS[mode].vercel.length;update();continue;
           }
