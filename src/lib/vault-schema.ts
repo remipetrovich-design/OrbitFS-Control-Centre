@@ -1,6 +1,6 @@
 import type { VaultRecord } from "./vault-crypto";
 
-export const VAULT_SYSTEMS = ["License","Billing","Base System","Shared Engine","Dev","Other"] as const;
+export const VAULT_SYSTEMS = ["License","Billing","Base System","Shared Engine","Dev","AI Repair Centre","Other"] as const;
 export const VAULT_SERVICES = ["GitHub","Vercel","Supabase","Other"] as const;
 export type VaultSystem = typeof VAULT_SYSTEMS[number];
 export type VaultService = typeof VAULT_SERVICES[number];
@@ -51,10 +51,14 @@ export const GITHUB_WORKFLOW_REFERENCES = [
  {system:"Base System" as VaultSystem,name:"LICENSE_MASTER_URL",repo:"lucaskerim123/V1-vercel-base",usedIn:"main" as VaultMode},
  {system:"Shared Engine" as VaultSystem,name:"LICENSE_MASTER_API_TOKEN",repo:"lucaskerim123/V1-vercel-engine",usedIn:"main" as VaultMode},
  {system:"Shared Engine" as VaultSystem,name:"LICENSE_MASTER_URL",repo:"lucaskerim123/V1-vercel-engine",usedIn:"main" as VaultMode},
+ // AI Repair source-validation workflow: saved as GitHub Actions secrets, never sent automatically.
+ {system:"AI Repair Centre" as VaultSystem,name:"MAIN_REPAIR_READ_TOKEN",repo:"remipetrovich-design/AI-Repair-Centre",usedIn:"fallback" as VaultMode},
+ {system:"AI Repair Centre" as VaultSystem,name:"FALLBACK_REPAIR_READ_TOKEN",repo:"remipetrovich-design/AI-Repair-Centre",usedIn:"fallback" as VaultMode},
 ] as const;
 
 export function systemForProject(name:string):VaultSystem {
  const n=name.toLowerCase();
+ if(n.includes("ai-repair-centre"))return "AI Repair Centre";
  if(n.includes("licen"))return "License";
  if(n.includes("billing"))return "Billing";
  if(n.includes("dev-panel")||n.includes("deploy-panel"))return "Dev";
