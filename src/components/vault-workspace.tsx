@@ -312,6 +312,15 @@ export function VaultWorkspace({session}:{session:any}){
     const q=query.trim().toLowerCase();
     return records.filter(row=>!q||[row.systems[0],row.service,row.keyName,...vaultDestinations(row),...(row.usedIn||[])].some(v=>String(v||"").toLowerCase().includes(q)));
   },[records,query]);
+  function openOutboundSync(provider:"GitHub"|"Vercel"){
+    setSyncProvider(provider);
+    setProviderSyncOpen(true);
+    requestAnimationFrame(()=>document.getElementById("vault-provider-sync")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+  const syncCounts={
+    GitHub:records.filter(row=>row.service==="GitHub"&&!isVaultConnection(row)&&vaultDestinations(row).length>0).length,
+    Vercel:records.filter(row=>row.service==="Vercel"&&!isVaultConnection(row)&&vaultDestinations(row).length>0).length
+  };
   const groupedEntries=groupVaultItems(filtered,row=>row);
   const needingReview=records.filter(row=>row.needsReview||!vaultDestinations(row).length);
 
@@ -332,6 +341,15 @@ export function VaultWorkspace({session}:{session:any}){
 
   return <section className="space-y-4">
     <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" type="button" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-3" aria-label="Sync Vault to providers">
+      <h2 className="text-sm font-semibold">Sync from Vault → GitHub / Vercel</h2>
+      <p className="text-xs text-muted-foreground">Your saved Vault entries are the desired values for these destinations. Sync compares the exact assigned target, then lets you review and confirm creating or overriding values. Nothing deletes remote secrets or variables.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="button-primary" onClick={()=>openOutboundSync("GitHub")}><Upload size={14}/> Sync Vault → GitHub ({syncCounts.GitHub})</button>
+        <button type="button" className="button-primary" onClick={()=>openOutboundSync("Vercel")}><Upload size={14}/> Sync Vault → Vercel ({syncCounts.Vercel})</button>
+      </div>
+      <p className="text-xs text-muted-foreground">Syncing needs an unlocked Vault, valid account credentials, a selected repository or project, and explicit approval for each write. GitHub secret values cannot be compared remotely, so no automatic secret drift verdict is implied. Runtime services still use provider-side variables; they do not read directly from this browser-encrypted Vault.</p>
+    </section>
     <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-2" aria-label="Vault encrypted backup">
       <h2 className="text-sm font-semibold">Backup your current Vault</h2>
       <p className="text-xs text-muted-foreground">Download the latest saved encrypted entries before redesigning. Your saved keys are not changed.</p>
@@ -492,7 +510,7 @@ export function VaultWorkspace({session}:{session:any}){
 
     <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
-      <summary className="cursor-pointer text-sm font-semibold">Pull / Send variables · Vercel / GitHub</summary>
+      <summary className="cursor-pointer text-sm font-semibold">Sync Vault → Provider · compare / review / create / override</summary>
       <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
       <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Send variables provider">
         {(["Vercel","GitHub"] as const).map(provider=><button type="button" key={provider} role="tab" aria-selected={syncProvider===provider} className={syncProvider===provider?"button-primary":"button-secondary"} onClick={()=>setSyncProvider(provider)}>Send to {provider}</button>)}
