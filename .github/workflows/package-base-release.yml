@@ -293,8 +293,11 @@ jobs:
           if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
             error_code="$(jq -r '.code // .error // .message // "unknown"' "$response_file" 2>/dev/null || true)"
             rm -f "$response_file"
-            echo "::error::License Manager cannot resolve a validated Base database package (HTTP $status): $error_code"
-            echo "::error::Build and validate the Base database package through the central database manual release flow first."
+            if [ "$status" = "401" ] || [ "$status" = "403" ]; then
+              echo "::error::Fallback License Manager rejected the Fallback Control Centre GitHub Actions LICENSE_MASTER_API_TOKEN (HTTP $status: $error_code). Verify this GitHub Actions secret matches an active Fallback License Manager managed API key with database.packages.read permission. This is NOT the ORBITFS_FALLBACK_GITHUB_TOKEN and does not require rebuilding the central database package."
+            else
+              echo "::error::License Manager could not resolve the validated Base database package (HTTP $status: $error_code). Check central database validation and package registry before retrying."
+            fi
             exit 1
           fi
           reference="$(jq -ec '.packages | if length==1 then .[0] else error("Expected exactly one Base database package") end | {id,component,databaseSchemaVersion,sha256,sourceRepo,sourceCommit,status,resolutionSource}' "$response_file")"
