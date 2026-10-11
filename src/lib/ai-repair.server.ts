@@ -95,7 +95,8 @@ export const getAiRepairIncidents=createServerFn({method:"POST"}).handler(async(
  const response=await fetch(root,{headers:{apikey:key,Authorization:"Bearer "+key},cache:"no-store",signal:AbortSignal.timeout(8000)});
  if(!response.ok)throw new Error("Repair history lookup failed: "+response.status);
  const rows=await response.json();
- return {historyAvailable:true,incidents:rows.map((row:any)=>({id:row.id,profile:row.profile,kind:row.kind,repo:row.repository,sha:row.source_sha,runId:row.run_id,jobId:row.job_id,runUrl:row.run_url,workflow:row.workflow_name,jobName:row.job_name,failedSteps:row.failed_steps,status:row.status,classification:row.classification,detectedAt:row.detected_at,logExcerpt:row.error_excerpt?.slice(-3000)}))};
+ const archived=await repairDbRead("repair_incidents?select=repository,run_id&profile=eq."+(selection.profile==="primary"?"main":"fallback")+"&archived_at=not.is.null&limit=300");
+ return {historyAvailable:true,archivedRuns:archived.map((row:any)=>({repo:row.repository,runId:row.run_id})),incidents:rows.map((row:any)=>({id:row.id,profile:row.profile,kind:row.kind,repo:row.repository,sha:row.source_sha,runId:row.run_id,jobId:row.job_id,runUrl:row.run_url,workflow:row.workflow_name,jobName:row.job_name,failedSteps:row.failed_steps,status:row.status,classification:row.classification,detectedAt:row.detected_at,logExcerpt:row.error_excerpt?.slice(-3000)}))};
 });
 export const getAiRepairIncident=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;source?:boolean}})=>{
  requireOwner(data.token);
