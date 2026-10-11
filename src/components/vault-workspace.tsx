@@ -447,26 +447,6 @@ export function VaultWorkspace({session}:{session:any}){
         {syncProvider==="Vercel"?<VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/>:<VaultGithubSync session={session} records={records} onPersist={persist}/>}
       </div>
     </details>
-    <details className="orbit-panel min-w-0 max-w-full p-4 space-y-3">
-      <summary className="cursor-pointer text-sm font-semibold">Recovery / Configuration / Setup</summary>
-      <div className="mt-4 rounded-lg border border-red-500/40 p-3 space-y-3">
-        <div>
-          <h3 className="text-sm font-semibold">Clear encrypted Vault entries</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Deletes only the encrypted Vault copy, including saved provider connection tokens. It never removes or changes any GitHub Actions secrets, GitHub Actions variables, or Vercel environment variables. To restore the inventory, reconnect your provider accounts and use Pull / Sync from Providers.</p>
-        </div>
-        {!showClearVault?<button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(true);setClearConfirmation("");}}><Trash2 size={14}/> Clear Vault…</button>:
-        <div className="space-y-2">
-          <label className="block text-xs font-medium" htmlFor="vault-clear-confirm">Type CLEAR VAULT to confirm deletion of all {records.length} saved entries</label>
-          <input id="vault-clear-confirm" className="control w-full" autoComplete="off" spellCheck={false} value={clearConfirmation} onChange={e=>setClearConfirmation(e.target.value)} placeholder="CLEAR VAULT"/>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="button-secondary" disabled={busy||clearConfirmation!=="CLEAR VAULT"} onClick={()=>void clearVault()}>{busy?"Clearing…":"Delete all Vault entries"}</button>
-            <button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(false);setClearConfirmation("");}}>Cancel</button>
-          </div>
-        </div>}
-      </div>
-
-
-      <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
       <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
       <section className="mt-3 rounded-lg border border-border p-3 space-y-3" aria-label="JSON import and conflict settings">
         <h3 className="text-sm font-semibold">Import JSON · choose how existing keys are handled</h3>
@@ -498,6 +478,27 @@ export function VaultWorkspace({session}:{session:any}){
         </div>}
       </section>
 
+
+    <details className="orbit-panel min-w-0 max-w-full p-4 space-y-3">
+      <summary className="cursor-pointer text-sm font-semibold">Recovery / Configuration / Setup</summary>
+      <div className="mt-4 rounded-lg border border-red-500/40 p-3 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Clear encrypted Vault entries</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Deletes only the encrypted Vault copy, including saved provider connection tokens. It never removes or changes any GitHub Actions secrets, GitHub Actions variables, or Vercel environment variables. To restore the inventory, reconnect your provider accounts and use Pull / Sync from Providers.</p>
+        </div>
+        {!showClearVault?<button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(true);setClearConfirmation("");}}><Trash2 size={14}/> Clear Vault…</button>:
+        <div className="space-y-2">
+          <label className="block text-xs font-medium" htmlFor="vault-clear-confirm">Type CLEAR VAULT to confirm deletion of all {records.length} saved entries</label>
+          <input id="vault-clear-confirm" className="control w-full" autoComplete="off" spellCheck={false} value={clearConfirmation} onChange={e=>setClearConfirmation(e.target.value)} placeholder="CLEAR VAULT"/>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="button-secondary" disabled={busy||clearConfirmation!=="CLEAR VAULT"} onClick={()=>void clearVault()}>{busy?"Clearing…":"Delete all Vault entries"}</button>
+            <button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(false);setClearConfirmation("");}}>Cancel</button>
+          </div>
+        </div>}
+      </div>
+
+
+      <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
     <details className="orbit-panel p-4">
       <summary className="cursor-pointer text-xs font-semibold">Advanced · Restore lost account connections</summary>
       <p className="mt-2 text-xs text-muted-foreground">Only needed if an older Vault import replaced the saved GitHub/Vercel account tokens. Normal imports now preserve them.</p>
