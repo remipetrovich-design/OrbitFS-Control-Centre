@@ -75,6 +75,9 @@ export function VaultWorkspace({session}:{session:any}){
   const [visible,setVisible]=useState<string[]>([]);
   const [draftVisible,setDraftVisible]=useState(false);
   const [importRows,setImportRows]=useState<VaultRecord[]>([]);
+  const [importConflicts,setImportConflicts]=useState<Array<{identity:string;keyName:string;options:Array<{row:VaultRecord;line:number}>}>>([]);
+  const [importConflictChoices,setImportConflictChoices]=useState<Record<string,string>>({});
+  const [importMergedCount,setImportMergedCount]=useState(0);
   const [importMode,setImportMode]=useState<"skip"|"override"|"replace-all">("skip");
   const [replaceApproved,setReplaceApproved]=useState(false);
   const [showClearVault,setShowClearVault]=useState(false);
@@ -235,7 +238,7 @@ export function VaultWorkspace({session}:{session:any}){
   }
 
   async function prepareImport(event:React.ChangeEvent<HTMLInputElement>){
-    setError("");setNotice("");setImportRows([]);setReplaceApproved(false);
+    setError("");setNotice("");setImportRows([]);setImportConflicts([]);setImportConflictChoices({});setImportMergedCount(0);setReplaceApproved(false);
     const file=event.target.files?.[0];event.target.value="";if(!file)return;
     try{
       if(file.size>1024*1024)throw new Error("Import file must be 1 MB or smaller.");
@@ -260,17 +263,43 @@ export function VaultWorkspace({session}:{session:any}){
         };
         return normalizeVaultRecord(record);
       });
-      const seen=new Set<string>();
-      for(const row of rows){
-        const id=recordIdentity(row);
-        if(seen.has(id))throw new Error("Duplicate same-system destination in import: "+row.keyName);
-        seen.add(id);
+      // Import exports often contain multiple records for an identical exact
+      // service/system/mode/destination/key. Collapse identical/blank duplicates,
+      // but never silently choose between two different nonblank credentials.
+      const groups=new Map<string,Array<{row:VaultRecord;line:number}>>();
+      rows.forEach((row,index)=>{
+        const identity=recordIdentity(row);
+        const entries=groups.get(identity)||[];
+        entries.push({row,line:index+1});groups.set(identity,entries);
+      });
+      const merged:VaultRecord[]=[];
+      const conflicts:Array<{identity:string;keyName:string;options:Array<{row:VaultRecord;line:number}>}>=[];
+      let duplicates=0;
+      for(const [identity,entries] of groups){
+        duplicates+=entries.length-1;
+        const values=[...new Set(entries.map(x=>x.row.secret).filter(v=>v.trim()))];
+        // Prefer the populated entry over an empty placeholder, regardless of row order.
+        const preferred=entries.find(x=>x.row.secret===values[0])||entries[0]!;
+        merged.push(preferred.row);
+        if(values.length>1){
+          conflicts.push({identity,keyName:preferred.row.keyName,
+            options:entries.filter(x=>x.row.secret.trim() && values.includes(x.row.secret))});
+        }
       }
-      setImportRows(rows);
+      setImportRows(merged);
+      setImportConflicts(conflicts);
+      setImportConflictChoices({});
+      setImportMergedCount(duplicates);
+      setNotice(merged.length+" unique entries loaded from "+rows.length+" JSON rows. "+
+        (conflicts.length?conflicts.length+" conflicting values need a selection below before import.":"Duplicate blanks and matching values were safely consolidated."));
     }catch(x:any){setError(x.message||"Unable to read import file.")}
   }
 
   async function confirmImport(){
+    if(importConflicts.some(group=>!importConflictChoices[group.identity])){
+      setError("Choose which value to keep for all "+importConflicts.length+" conflicting JSON entries before importing.");
+      return;
+    }
     if(importMode==="replace-all"&&!replaceApproved){setError("Export the old Vault as a backup and confirm the full replacement before proceeding.");return;}
     setBusy(true);setError("");
     try{
@@ -284,7 +313,7 @@ export function VaultWorkspace({session}:{session:any}){
         return replacement?{...replacement,id:row.id,vercelTargets:row.vercelTargets,githubTargets:row.githubTargets}:row;
       });
       const replacement=preserveVaultConnections(records,importMode==="replace-all"?importRows:[...additions,...next]);
-      await persist(replacement);setPendingMigration(null);setImportRows([]);setReplaceApproved(false);
+      await persist(replacement);setPendingMigration(null);setImportRows([]);setImportConflicts([]);setImportConflictChoices({});setImportMergedCount(0);setReplaceApproved(false);
       setNotice(importMode==="replace-all"?"Other keys replaced; saved GitHub/Vercel account connections protected. "+importRows.length+" imported entries processed.":"Added "+additions.length+", replaced "+overrides.length+", skipped "+(importRows.length-additions.length-overrides.length)+".");
     }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
   }
@@ -472,7 +501,23 @@ export function VaultWorkspace({session}:{session:any}){
           <label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" disabled={busy} onChange={e=>void prepareImport(e)}/></label>
         </div>
         {importRows.length>0&&<div className="space-y-3 border-t pt-3">
-          <p className="text-xs font-medium">{importRows.length} entries ready to import. Values remain hidden.</p>
+          <p className="text-xs font-medium">{importRows.length} unique entries ready · {importMergedCount} duplicate rows consolidated. Values remain hidden.</p>
+          {importConflicts.length>0&&<div className="space-y-3 rounded border p-3" aria-label="Resolve imported variable conflicts">
+            <p className="text-xs font-semibold">{importConflicts.length} exact-destination keys have conflicting nonblank values. Choose one JSON row per key; nothing is sent to GitHub or Vercel.</p>
+            {importConflicts.map(group=><fieldset className="space-y-2 rounded border p-2" key={group.identity}>
+              <legend className="font-mono text-xs font-semibold break-all">{group.keyName}</legend>
+              <p className="text-xs text-muted-foreground">Same service, system, mode and destination: {group.options[0]?.row.destinationSystem||"Unassigned"}</p>
+              {group.options.map(option=><label key={option.row.id} className="flex items-center gap-2 text-xs">
+                <input type="radio" name={"conflict-"+group.identity} checked={importConflictChoices[group.identity]===option.row.id} disabled={busy}
+                  onChange={()=>{
+                    setImportConflictChoices(prev=>({...prev,[group.identity]:option.row.id}));
+                    setImportRows(prev=>prev.map(row=>recordIdentity(row)===group.identity?option.row:row));
+                    setError("");
+                  }}/>
+                JSON row {option.line} · value supplied (hidden)
+              </label>)}
+            </fieldset>)}
+          </div>}
           <div className="max-h-40 overflow-auto text-xs space-y-1">{importRows.map(row=><p key={row.id} className="border-b py-1 break-all font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"} {row.secret?"· value supplied":"· blank value"}</p>)}</div>
           <p className="text-xs text-muted-foreground">Matching entries: {importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length}. Selection: {importMode==="skip"?"Skip saved keys":importMode==="override"?"Override saved keys":"Replace all non-connection entries"}.</p>
           {importMode==="replace-all"&&<div className="rounded border p-3 space-y-2">
@@ -481,8 +526,8 @@ export function VaultWorkspace({session}:{session:any}){
             <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> Confirm replacing local non-connection entries; keep saved provider connections</label>
           </div>}
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{busy?"Importing…":importMode==="skip"?"Import · skip existing":importMode==="override"?"Import · override existing":"Replace local Vault entries"}</button>
-            <button type="button" className="button-secondary" disabled={busy} onClick={()=>setImportRows([])}>Cancel import</button>
+            <button type="button" className="button-primary" disabled={busy||importConflicts.some(group=>!importConflictChoices[group.identity])||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{busy?"Importing…":importMode==="skip"?"Import · skip existing":importMode==="override"?"Import · override existing":"Replace local Vault entries"}</button>
+            <button type="button" className="button-secondary" disabled={busy} onClick={()=>{setImportRows([]);setImportConflicts([]);setImportConflictChoices({});setImportMergedCount(0)}}>Cancel import</button>
           </div>
         </div>}
       </section>
