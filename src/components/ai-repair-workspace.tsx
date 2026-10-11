@@ -31,7 +31,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   try{
    const [o,s]=await Promise.all([getAiRepairOverview({data:{token}}),getAiRepairServiceState({data:{token}})]);
    setOverview(o);setService(s);
-   if(s.available){try{const r=await getAiRepairIncidents({data:{token}});setIncidents(r.incidents||[]);}catch(e:any){setError(e.message||"Cannot load incident storage")}}
+   if(s.available||s.historyAvailable){try{const r=await getAiRepairIncidents({data:{token}});setIncidents(r.incidents||[]);}catch(e:any){setError(e.message||"Cannot load incident storage")}}
   }catch(e:any){setError(e.message||"Failed to load AI Repair Centre")}
   finally{setBusy("")}
  },[token]);
@@ -93,8 +93,8 @@ export function AiRepairWorkspace({session}:{session:any}){
    {[
     ["Failed runs",String(runs.length),Activity],
     ["Stored incidents",String(incidents.length),AlertTriangle],
-    ["Worker",available?"Connected":"Not connected",Terminal],
-    ["OpenRouter",available?(service?.automaticAIRequestsEnabled?"Auto · free only":"Manual · free only"):"Unavailable",Zap]
+    ["Worker",available?"Connected":service?.historyAvailable?"Scheduled Actions":"Not connected",Terminal],
+    ["OpenRouter",service?.automaticAIRequestsEnabled?"Scheduled · free only":available?"Manual · free only":"Unavailable",Zap]
    ].map(([title,value,Icon]:any)=><div key={title} className="rounded-xl border border-border bg-card p-4"><p className="flex items-center gap-2 text-xs text-muted-foreground"><Icon size={14}/>{title}</p><p className="mt-3 text-xl font-semibold">{value}</p></div>)}
   </div>
   <nav className="flex flex-wrap gap-1 border-b border-border pb-2" aria-label="AI Repair sections">
@@ -118,6 +118,6 @@ export function AiRepairWorkspace({session}:{session:any}){
    </>}
   </div>}
   {section==="recovery"&&<Card title="Release recovery"><p className="text-sm text-muted-foreground">Repair results must re-enter the existing GitHub release workflow, License Manager validation and technical approval. Billing final review and publication are always manual.</p><div className="flex flex-wrap gap-2"><Pill label="Automatic publication disabled" ok/><Pill label="Recovery dispatch not configured"/></div><p className="text-xs text-muted-foreground">No alternate release registry or approval state is created here.</p></Card>}
-  {section==="settings"&&<div className="grid gap-3 md:grid-cols-2"><Card title="Service connection"><Pill label={available?"Repair service connected":"Repair service not connected"} ok={available}/><p className="text-xs text-muted-foreground">{service?.error||"Connected server-side. Credentials stay out of browser code."}</p><p className="text-xs text-muted-foreground">The worker requires an approved host or GitHub Actions adapter. These settings are server-managed.</p></Card><Card title="Profile and source authority"><p className="text-sm">Active profile: <b>{current?.profile||"unavailable"}</b></p><p className="text-xs break-all">{current?.baseRepo}</p><p className="text-xs break-all">{current?.engineRepo}</p><p className="text-xs text-muted-foreground">This page follows License Manager's existing switch. It cannot override the profile.</p></Card><Card title="AI and usage"><p className="text-sm">OpenRouter: automatic for new error signatures when the backend is connected and enabled</p><p className="text-xs text-muted-foreground">Matching repeat errors reuse the previous analysis without additional model calls. Free models only, capped daily usage; no automatic source writes or publication.</p></Card><Card title="Safety policy"><p className="text-sm">Restricted repairs and audited validation</p><p className="text-xs text-muted-foreground">No remote source writes or release actions from this UI. Production release authorisation belongs to License Manager. Customer publication remains manual.</p></Card></div>}
+  {section==="settings"&&<div className="grid gap-3 md:grid-cols-2"><Card title="Service connection"><Pill label={available?"Repair service connected":service?.historyAvailable?"Persistent repair history connected":"Repair service not connected"} ok={available||Boolean(service?.historyAvailable)}/><p className="text-xs text-muted-foreground">{service?.error||"Connected server-side. Credentials stay out of browser code."}</p><p className="text-xs text-muted-foreground">The worker requires an approved host or GitHub Actions adapter. These settings are server-managed.</p></Card><Card title="Profile and source authority"><p className="text-sm">Active profile: <b>{current?.profile||"unavailable"}</b></p><p className="text-xs break-all">{current?.baseRepo}</p><p className="text-xs break-all">{current?.engineRepo}</p><p className="text-xs text-muted-foreground">This page follows License Manager's existing switch. It cannot override the profile.</p></Card><Card title="AI and usage"><p className="text-sm">OpenRouter: automatic for new error signatures when the backend is connected and enabled</p><p className="text-xs text-muted-foreground">Matching repeat errors reuse the previous analysis without additional model calls. Free models only, capped daily usage; no automatic source writes or publication.</p></Card><Card title="Safety policy"><p className="text-sm">Restricted repairs and audited validation</p><p className="text-xs text-muted-foreground">No remote source writes or release actions from this UI. Production release authorisation belongs to License Manager. Customer publication remains manual.</p></Card></div>}
  </div>;
 }
