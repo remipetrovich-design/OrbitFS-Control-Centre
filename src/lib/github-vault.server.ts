@@ -84,12 +84,14 @@ async function productionEnvironment(owner:string, repo:string, githubToken:stri
   return matches[0]!.name!;
 }
 
-function normalizeRows(items: unknown): GithubItem[] {
+function normalizeRows(items: unknown, kind: GithubKind): GithubItem[] {
   if (!Array.isArray(items)) throw new Error("GitHub did not return an Actions inventory.");
   return items.map((x:any)=>({
     name: typeof x?.name==="string" ? x.name : "",
     updatedAt: typeof x?.updated_at==="string" ? x.updated_at : null,
     createdAt: typeof x?.created_at==="string" ? x.created_at : null,
+    // GitHub Actions variables are readable; encrypted Actions secrets are not.
+    ...(kind==="variable"&&typeof x?.value==="string"?{value:x.value}:{})
   })).filter(x=>Boolean(x.name));
 }
 
@@ -100,7 +102,7 @@ async function inventory(input: Target, owner: string, repo: string) {
   for(let page=1;page<=10;page++){
     const path = base + "?per_page=100&page=" + page;
     const result = await githubApi<{total_count?:number;secrets?:unknown[];variables?:unknown[]}>(path,input.githubToken);
-    const batch = normalizeRows(input.kind==="secret" ? result.secrets : result.variables);
+    const batch = normalizeRows(input.kind==="secret" ? result.secrets : result.variables,input.kind);
     all = all.concat(batch);
     if(batch.length<100) return {items:all,environment:environment||null,base};
   }
