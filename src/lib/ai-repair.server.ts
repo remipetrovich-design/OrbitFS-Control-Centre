@@ -56,6 +56,42 @@ async function repairService(path:string,method:"GET"|"POST"="GET",payload?:unkn
  if(!response.ok)throw Error(String(body.error||"Repair service returned "+response.status));
  return body;
 }
+// Read-only live worker console. Status comes from GitHub Actions, never a local copy.
+export const getAiRepairLiveActions=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOwner(data.token);
+ const selection=await active();
+ // The scheduled diagnosis worker currently belongs to the Fallback system only.
+ if(selection.profile!=="fallback")return {profile:selection.profile,available:false,runs:[],reason:"The dedicated AI Repair Actions worker is configured for Fallback only.",checkedAt:new Date().toISOString()};
+ const repo="remipetrovich-design/AI-Repair-Centre";
+ const workerToken=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ if(!workerToken)throw Error("AI Repair worker GitHub access is not configured.");
+ const headers={Authorization:"Bearer "+workerToken,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"};
+ const get=async(path:string)=>{
+  const response=await fetch("https://api.github.com/repos/"+repo+path,{headers,cache:"no-store",signal:AbortSignal.timeout(12000)});
+  if(!response.ok)throw Error("AI Repair worker GitHub Actions status returned HTTP "+response.status);
+  return response.json();
+ };
+ const recent=await get("/actions/runs?per_page=30");
+ const all=(recent.workflow_runs||[]).filter((run:any)=>run.event!=="pull_request");
+ const activeStatuses=new Set(["queued","in_progress","waiting","requested","pending"]);
+ const activeRuns=all.filter((run:any)=>activeStatuses.has(String(run.status||"").toLowerCase()));
+ // Include recent completed attempts so the console remains useful after a worker finishes.
+ const display=[...activeRuns,...all.filter((run:any)=>!activeStatuses.has(String(run.status||"").toLowerCase())).slice(0,5)].slice(0,12);
+ const entries=await Promise.allSettled(display.map(async(run:any)=>{
+  const jobs=await get("/actions/runs/"+run.id+"/jobs?per_page=100");
+  return {id:run.id,workflow:run.name,status:run.status,conclusion:run.conclusion,branch:run.head_branch,sha:run.head_sha,
+   url:run.html_url,createdAt:run.created_at,updatedAt:run.updated_at,startedAt:run.run_started_at,
+   jobs:(jobs.jobs||[]).map((job:any)=>({id:job.id,name:job.name,status:job.status,conclusion:job.conclusion,
+    url:job.html_url,startedAt:job.started_at,completedAt:job.completed_at,
+    steps:(job.steps||[]).map((step:any)=>({name:step.name,number:step.number,status:step.status,conclusion:step.conclusion,startedAt:step.started_at,completedAt:step.completed_at}))}))};
+ }));
+ const runs=entries.map((result,i)=>result.status==="fulfilled"?result.value:{
+  id:display[i].id,workflow:display[i].name,status:display[i].status,conclusion:display[i].conclusion,
+  url:display[i].html_url,jobs:[],error:String((result as PromiseRejectedResult).reason?.message||"Job details unavailable")
+ });
+ return {profile:selection.profile,available:true,repo,runs,activeCount:activeRuns.length,checkedAt:new Date().toISOString()};
+});
+
 export const getAiRepairRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number}})=>{
  requireOwner(data.token);
  const selection=await active();
