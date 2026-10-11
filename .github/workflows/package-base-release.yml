@@ -59,7 +59,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  LICENSE_MASTER_URL: ${{ vars.LICENSE_MASTER_URL || 'https://incendiarynetworks.cc/api/v1' }}
+  LICENSE_MASTER_URL: https://lm.incendiarynetworks.cc/api/v1
 
 jobs:
   base-validation:
@@ -76,7 +76,7 @@ jobs:
           EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://lm.incendiarynetworks.cc/api/v1/github-profile)"
           active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
           echo "Active GitHub profile: $active"
           echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
