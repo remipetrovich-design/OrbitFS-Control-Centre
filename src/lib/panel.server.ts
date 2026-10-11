@@ -1917,6 +1917,24 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
  };
 });
 
+export const runDatabaseSystemValidation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;confirmTestReset:boolean}})=>{
+ requireOperationsUser(data.token);
+ if(data.confirmTestReset!==true)throw new Error("Explicit approval to reset the two disposable validation databases is required.");
+ const source=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+ const headSha=String(source?.object?.sha||"");
+ if(!/^[a-f0-9]{40}$/i.test(headSha))throw new Error("Cannot verify central database source commit.");
+ const runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,20);
+ const existing=runs.find((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&["queued","in_progress","waiting","pending"].includes(run.status));
+ if(existing)return {ok:true,reused:true,run:existing,sourceCommit:headSha,message:"Manual database validation is already running."};
+ const startedAt=Date.now();
+ await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_BUILD_WORKFLOW)}/dispatches`,{
+  method:"POST",
+  body:JSON.stringify({ref:MASTER_DATABASE_REF,inputs:{confirm_test_reset:true}})
+ });
+ const run=await latestDispatchedDatabaseRun(MASTER_DATABASE_BUILD_WORKFLOW,startedAt);
+ return {ok:true,run,sourceCommit:headSha,message:"Real-database validation queued for the two disposable test databases."};
+});
+
 export const runDatabaseSystemBuild=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;component:string;registerCandidate?:boolean;reason?:string}})=>{
  requireOperationsUser(data.token);
  const component=String(data.component||"all").trim().toLowerCase();
