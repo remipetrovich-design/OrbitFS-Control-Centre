@@ -1533,8 +1533,22 @@ export async function clearReleaseStateCore(data:{type:"base"|"engine";version:s
 
 export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
  const actor=readSession(data.token);
- if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to clear a release.");
- return clearReleaseStateCore({type:data.type,version:data.version,channel:data.channel});
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to reset a Stage 1 draft.");
+ const version=String(data.version||"").trim();
+ if(!isOrbitReleaseVersion(version))throw new Error("A valid 2–4 part numeric release version is required.");
+ const channel=normalizeChannel(data.channel||"stable");
+ const releaseType=data.type==="base"?"base":"update";
+ const sb=authClient();
+ const {data:drafts,error:readError}=await sb.from("panel_release_drafts")
+  .select("id,status,last_run_id").eq("release_type",releaseType).eq("version",version).eq("channel",channel);
+ if(readError)throw new Error("Unable to read local Stage 1 drafts: "+readError.message);
+ const active=(drafts||[]).find((draft:any)=>["building","awaiting_receipt"].includes(String(draft.status||"").toLowerCase()));
+ if(active)throw new Error("This draft has an active or pending release attempt. Finish or cancel it before starting a new draft.");
+ const {error:deleteError}=await sb.from("panel_release_drafts").delete()
+  .eq("release_type",releaseType).eq("version",version).eq("channel",channel);
+ if(deleteError)throw new Error("Unable to clear local Stage 1 drafts: "+deleteError.message);
+ return {ok:true,version,channel,releaseType,deletedDrafts:(drafts||[]).length,
+  message:"Stage 1 draft reset. License Manager records, Billing publication and release history were not changed."};
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
