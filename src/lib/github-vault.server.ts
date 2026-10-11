@@ -42,7 +42,7 @@ async function githubApi<T>(path: string, githubToken: string, init: RequestInit
       const required=path.includes("/actions/secrets") ? "Actions Secrets" :
         path.includes("/actions/variables") ? "Actions Variables" :
         path.includes("/environments") ? "Environments" : "Repository access";
-      throw new Error("GitHub denied "+required+" (403) for "+path.split("?")[0].replace(/^\\/repos\\/[^/]+\\/[^/]+/,"the selected repository")+
+      throw new Error("GitHub denied "+required+" (403) for "+path.split("?")[0].replace(new RegExp("^/repos/[^/]+/[^/]+"),"the selected repository")+
         ". Check that the saved account token includes this repository and has the required read permissions. No Vault values were changed.");
     }
     if (response.status === 404) throw new Error("GitHub repository or Actions endpoint unavailable (404). Check selected repository and token permissions.");
