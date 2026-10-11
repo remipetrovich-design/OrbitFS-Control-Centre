@@ -136,6 +136,25 @@ function explainReleaseFailure(log:string,steps:string[]){
 function sanitiseRepairLog(value:string){
  return String(value||"").replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]").replace(/((?:token|password|secret|api[_-]?key)\s*[:=]\s*)[^\s]+/gi,"$1[REDACTED]").slice(-16000);
 }
+const REPAIR_HISTORY_PROJECT="ffmfogljikvybzgunauo";
+async function savedRepairForRun(repo:string,runId:string,profile:"primary"|"fallback"){
+ const key=String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"").trim();
+ if(!key)return null; // The rule-based repair panel remains usable until server secret is installed.
+ const root="https://"+REPAIR_HISTORY_PROJECT+".supabase.co/rest/v1/";
+ const headers={apikey:key,Authorization:"Bearer "+key,Accept:"application/json"};
+ const read=async(path:string)=>{
+  const response=await fetch(root+path,{headers,cache:"no-store",signal:AbortSignal.timeout(6000)});
+  if(!response.ok)throw new Error("Repair history request failed: "+response.status);
+  return await response.json();
+ };
+ const incidents=await read("repair_incidents?repository=eq."+encodeURIComponent(repo)+"&run_id=eq."+encodeURIComponent(runId)+"&order=detected_at.desc&limit=1");
+ const incident=incidents?.[0];
+ if(!incident||incident.profile!==(profile==="primary"?"main":"fallback"))return null;
+ const diagnoses=incident.fingerprint?await read("repair_diagnoses?repository=eq."+encodeURIComponent(repo)+"&fingerprint=eq."+encodeURIComponent(incident.fingerprint)+"&origin=eq.openrouter&limit=1"):[];
+ const diagnosis=diagnoses?.[0]||null;
+ const proposals=diagnosis?await read("repair_proposals?diagnosis_id=eq."+encodeURIComponent(diagnosis.id)+"&order=created_at.desc&limit=1"):[];
+ return {incident:{id:incident.id,status:incident.status,classification:incident.classification,sqlstate:incident.sqlstate},diagnosis:diagnosis?{summary:diagnosis.summary,recommendation:diagnosis.recommendation,confidence:diagnosis.confidence,model:diagnosis.model}:null,proposal:proposals?.[0]?.proposal||null};
+}
 export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number;type:"base"|"engine";savedError?:string}})=>{
  requireOwner(data.token);
  const selection=await active();
@@ -152,6 +171,8 @@ export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async(
   try{const response=await github(data.repo,"/actions/jobs/"+safeId(job.id)+"/logs",selection.profile);log=sanitiseRepairLog((await response.text()).slice(-80000))||log;}
   catch(e:any){logError=String(e.message||"Job logs unavailable");}
  }
- const solution=explainReleaseFailure(log,failedSteps);
- return {repo:data.repo,profile:selection.profile,type,runId:Number(id),jobId:job?.id||null,sha:String(run.head_sha||""),runUrl:run.html_url||null,status:run.status,conclusion:run.conclusion,failedSteps,log,logError,solution,ready:run.conclusion==="failure"||run.conclusion==="cancelled",checkedAt:new Date().toISOString()};
+ let stored:any=null;
+ try{stored=await savedRepairForRun(data.repo,id,selection.profile)}catch(error){console.error("Repair history lookup unavailable",error instanceof Error?error.message:"unknown");}
+ const solution=stored?.diagnosis?{category:stored.incident.classification,title:stored.diagnosis.summary,suggestion:stored.diagnosis.recommendation,confidence:"AI · "+stored.diagnosis.confidence,aiRequests:0}:explainReleaseFailure(log,failedSteps);
+ return {savedAi:stored,repo:data.repo,profile:selection.profile,type,runId:Number(id),jobId:job?.id||null,sha:String(run.head_sha||""),runUrl:run.html_url||null,status:run.status,conclusion:run.conclusion,failedSteps,log,logError,solution,ready:run.conclusion==="failure"||run.conclusion==="cancelled",checkedAt:new Date().toISOString()};
 });
