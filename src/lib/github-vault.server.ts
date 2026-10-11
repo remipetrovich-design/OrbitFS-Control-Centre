@@ -30,7 +30,21 @@ async function githubApi<T>(path: string, githubToken: string, init: RequestInit
   // Provider error bodies may contain sensitive information; never surface or log them.
   if (!response.ok) {
     if (response.status === 401) throw new Error("GitHub rejected the Vault token (401).");
-    if (response.status === 403) throw new Error("GitHub denied this operation (403). Check token repository Secrets, Variables and Environments permissions or rate limits.");
+    if (response.status === 403) {
+      const remaining=response.headers.get("x-ratelimit-remaining");
+      const reset=Number(response.headers.get("x-ratelimit-reset")||0);
+      const retryAfter=response.headers.get("retry-after");
+      if(remaining==="0" || retryAfter) {
+        const wait=retryAfter ? " Retry after "+retryAfter+" seconds." :
+          (reset>0 ? " Rate limit resets at "+new Date(reset*1000).toISOString()+"." : "");
+        throw new Error("GitHub API rate limit (403)."+wait);
+      }
+      const required=path.includes("/actions/secrets") ? "Actions Secrets" :
+        path.includes("/actions/variables") ? "Actions Variables" :
+        path.includes("/environments") ? "Environments" : "Repository access";
+      throw new Error("GitHub denied "+required+" (403) for "+path.split("?")[0].replace(/^\\/repos\\/[^/]+\\/[^/]+/,"the selected repository")+
+        ". Check that the saved account token includes this repository and has the required read permissions. No Vault values were changed.");
+    }
     if (response.status === 404) throw new Error("GitHub repository or Actions endpoint unavailable (404). Check selected repository and token permissions.");
     if (response.status === 409 || response.status === 422) throw new Error("GitHub rejected the requested change (HTTP " + response.status + "). Inspect again.");
     if (response.status === 429) throw new Error("GitHub rate limit reached.");
