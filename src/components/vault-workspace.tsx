@@ -66,6 +66,7 @@ export function VaultWorkspace({session}:{session:any}){
   const [browseMode,setBrowseMode]=useState<Record<"Vercel"|"GitHub",VaultMode>>({Vercel:"main",GitHub:"main"});
   const [browseTab,setBrowseTab]=useState<Record<"Vercel"|"GitHub",VaultTab>>({Vercel:"License",GitHub:"License"});
   const [syncProvider,setSyncProvider]=useState<"Vercel"|"GitHub">("Vercel");
+  const [providerSyncOpen,setProviderSyncOpen]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const [busy,setBusy]=useState(false);
@@ -256,9 +257,9 @@ export function VaultWorkspace({session}:{session:any}){
   }
 
   async function remove(id:string){
-    if(!window.confirm("Remove this Vault entry?"))return;
+    if(!window.confirm("Remove this entry from the encrypted Vault only? GitHub Actions secrets/variables and Vercel environment variables will NOT be deleted."))return;
     setBusy(true);setError("");
-    try{await persist(records.filter(row=>row.id!==id));setNotice("Vault entry removed.")}
+    try{await persist(records.filter(row=>row.id!==id));setNotice("Vault entry removed locally. GitHub and Vercel were not changed.")}
     catch(x:any){setError(x.message||"Unable to remove Vault entry.")}
     finally{setBusy(false)}
   }
@@ -403,9 +404,17 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
     </details>
-    <details className="orbit-panel min-w-0 max-w-full p-4">
-      <summary className="cursor-pointer text-sm font-semibold">Send variables · Vercel / GitHub</summary>
-      <p className="mt-2 text-xs text-muted-foreground">Choose a provider, inspect the destination and review each proposed change before applying.</p>
+    <section className="orbit-panel min-w-0 max-w-full p-4 space-y-3" aria-label="Restore Vault from providers">
+      <h2 className="text-sm font-semibold">Pull / Sync from Providers · restore Vault inventory</h2>
+      <p className="text-xs text-muted-foreground">Read-only recovery after clearing the Vault: reconnect Main/Fallback GitHub or Vercel accounts, load a repository or project, compare its existing names, then select Pull names into Vault. This never deletes, overwrites or changes provider variables.</p>
+      <p className="text-xs text-muted-foreground">GitHub Actions secrets cannot be read back; only names and metadata return as blank Vault references. Vercel Sensitive values are also unreadable. Where Vercel permits it, readable Config values can be imported individually. To restore actual unrecoverable secret values, use your encrypted Vault backup or enter them again.</p>
+      <div className="flex flex-wrap gap-2">
+        {(["GitHub","Vercel"] as const).map(provider=><button key={provider} type="button" className="button-secondary" onClick={()=>{setSyncProvider(provider);setProviderSyncOpen(true);requestAnimationFrame(()=>document.getElementById("vault-provider-sync")?.scrollIntoView({behavior:"smooth",block:"start"}));}}><Download size={14}/> Pull / Sync from {provider}</button>)}
+      </div>
+    </section>
+    <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer text-sm font-semibold">Pull / Send variables · Vercel / GitHub</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
       <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Send variables provider">
         {(["Vercel","GitHub"] as const).map(provider=><button type="button" key={provider} role="tab" aria-selected={syncProvider===provider} className={syncProvider===provider?"button-primary":"button-secondary"} onClick={()=>setSyncProvider(provider)}>Send to {provider}</button>)}
       </div>
@@ -418,7 +427,7 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 rounded-lg border border-red-500/40 p-3 space-y-3">
         <div>
           <h3 className="text-sm font-semibold">Clear encrypted Vault entries</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Removes every Vault entry, including saved account connections, and returns Vault to PIN setup. This does not delete any secrets already on GitHub or Vercel.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Deletes only the encrypted Vault copy, including saved provider connection tokens. It never removes or changes any GitHub Actions secrets, GitHub Actions variables, or Vercel environment variables. To restore the inventory, reconnect your provider accounts and use Pull / Sync from Providers.</p>
         </div>
         {!showClearVault?<button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(true);setClearConfirmation("");}}><Trash2 size={14}/> Clear Vault…</button>:
         <div className="space-y-2">
