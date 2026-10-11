@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye, EyeOff, Upload, Download } from "lucide-react";
 import { getVaultEnvelope, saveVaultEnvelope, clearVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
+import { VaultVercelSyncAll } from "@/components/vault-vercel-sync-all";
 import { VaultGithubSync } from "@/components/vault-github-sync";
 import { VaultProviderRecovery } from "@/components/vault-provider-recovery";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
@@ -350,6 +351,7 @@ export function VaultWorkspace({session}:{session:any}){
       </div>
       <p className="text-xs text-muted-foreground">Syncing needs an unlocked Vault, valid account credentials, a selected repository or project, and explicit approval for each write. GitHub secret values cannot be compared remotely, so no automatic secret drift verdict is implied. Runtime services still use provider-side variables; they do not read directly from this browser-encrypted Vault.</p>
     </section>
+    <VaultVercelSyncAll session={session} records={records} onPersist={persist}/>
     <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-2" aria-label="Vault encrypted backup">
       <h2 className="text-sm font-semibold">Backup your current Vault</h2>
       <p className="text-xs text-muted-foreground">Download the latest saved encrypted entries before redesigning. Your saved keys are not changed.</p>
