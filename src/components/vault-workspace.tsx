@@ -436,17 +436,6 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
     </details>
-    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
-    <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
-      <summary className="cursor-pointer text-sm font-semibold">Pull / Send variables · Vercel / GitHub</summary>
-      <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
-      <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Send variables provider">
-        {(["Vercel","GitHub"] as const).map(provider=><button type="button" key={provider} role="tab" aria-selected={syncProvider===provider} className={syncProvider===provider?"button-primary":"button-secondary"} onClick={()=>setSyncProvider(provider)}>Send to {provider}</button>)}
-      </div>
-      <div className="mt-4">
-        {syncProvider==="Vercel"?<VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/>:<VaultGithubSync session={session} records={records} onPersist={persist}/>}
-      </div>
-    </details>
       <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
       <section className="mt-3 rounded-lg border border-border p-3 space-y-3" aria-label="JSON import and conflict settings">
         <h3 className="text-sm font-semibold">Import JSON · choose how existing keys are handled</h3>
@@ -499,6 +488,18 @@ export function VaultWorkspace({session}:{session:any}){
 
 
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
+
+    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
+    <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer text-sm font-semibold">Pull / Send variables · Vercel / GitHub</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Send variables provider">
+        {(["Vercel","GitHub"] as const).map(provider=><button type="button" key={provider} role="tab" aria-selected={syncProvider===provider} className={syncProvider===provider?"button-primary":"button-secondary"} onClick={()=>setSyncProvider(provider)}>Send to {provider}</button>)}
+      </div>
+      <div className="mt-4">
+        {syncProvider==="Vercel"?<VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/>:<VaultGithubSync session={session} records={records} onPersist={persist}/>}
+      </div>
+    </details>
     <details className="orbit-panel p-4">
       <summary className="cursor-pointer text-xs font-semibold">Advanced · Restore lost account connections</summary>
       <p className="mt-2 text-xs text-muted-foreground">Only needed if an older Vault import replaced the saved GitHub/Vercel account tokens. Normal imports now preserve them.</p>
