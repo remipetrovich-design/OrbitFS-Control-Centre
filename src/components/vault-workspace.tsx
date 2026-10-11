@@ -488,6 +488,7 @@ export function VaultWorkspace({session}:{session:any}){
 
 
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
+    </details>
 
     <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
@@ -512,6 +513,5 @@ export function VaultWorkspace({session}:{session:any}){
       <VaultInventorySection records={records} onPersist={persist}/>
     </details>
 
-    </details>
   </section>;
 }
