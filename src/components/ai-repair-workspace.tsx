@@ -3,15 +3,15 @@ import {Activity,AlertTriangle,CheckCircle2,ChevronDown,Clipboard,ExternalLink,F
 import {getAiRepairOverview,getAiRepairRun,getAiRepairJobLog,getAiRepairServiceState,getAiRepairIncidents,getAiRepairIncident,requestAiRepairDiagnosis,validateAiRepairProposal,dispatchAiSourceValidation,getAiRepairControls,saveAiRepairControls,requestAiRepairWorkerCheck,archiveAiRepairIncident,hideAiRepairGithubRun} from "@/lib/ai-repair.server";
 
 type RepairPolicy={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
-type Section="overview"|"incidents"|"workspace"|"history"|"recovery"|"settings";
-const SECTIONS:[Section,string][]=[["overview","Overview"],["incidents","Incidents"],["workspace","Repair workspace"],["history","Job history"],["recovery","Release recovery"],["settings","Settings"]];
+type Section="incidents"|"workspace"|"recovery"|"settings";
+const SECTIONS:[Section,string][]=[["incidents","Incidents"],["workspace","Repair workspace"],["recovery","Release recovery"],["settings","Settings"]];
 function date(v?:string){return v?new Date(v).toLocaleString():"—"}
 function Pill({label,ok}:{label:string;ok?:boolean}){return <span className={`orbit-status-pill ${ok===true?"orbit-status-tone-success":ok===false?"orbit-status-tone-warning":"orbit-status-tone-neutral"}`}>{label}</span>}
 function Card({title,children}:{title:string;children:ReactNode}){return <section className="rounded-xl border border-border bg-card p-4 space-y-3"><h3 className="text-sm font-semibold">{title}</h3>{children}</section>}
 function Copy({text}:{text:string}){const [done,setDone]=useState(false);return <button className="button-secondary inline-flex items-center gap-2" type="button" disabled={!text} onClick={async()=>{try{await navigator.clipboard.writeText(text);setDone(true);setTimeout(()=>setDone(false),1800)}catch{setDone(false)}}}><Clipboard size={14}/>{done?"Copied":"Copy for ChatGPT"}</button>}
 
 export function AiRepairWorkspace({session}:{session:any}){
- const [section,setSection]=useState<Section>("overview");
+ const [section,setSection]=useState<Section>("incidents");
  const [controls,setControls]=useState<any>(null);
  const [policy,setPolicy]=useState<RepairPolicy|null>(null);
  const [overview,setOverview]=useState<any>(null);
@@ -138,7 +138,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   <nav className="flex flex-wrap gap-1 border-b border-border pb-2" aria-label="AI Repair sections">
    {SECTIONS.map(([id,label])=><button key={id} type="button" className={`rounded-md px-3 py-2 text-xs font-medium ${section===id?"bg-primary text-primary-foreground":"text-muted-foreground hover:bg-muted"}`} aria-current={section===id?"page":undefined} onClick={()=>setSection(id)}>{label}</button>)}
   </nav>
-  {(section==="overview"||section==="incidents"||section==="history")&&<>
+  {section==="incidents"&&<>
    <div className="flex flex-wrap items-center gap-2"><div className="relative min-w-[220px] flex-1"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15}/><input className="control w-full pl-9" placeholder="Search failures, repository, run…" value={query} onChange={e=>setQuery(e.target.value)}/></div><select className="control max-w-[150px]" value={kind} onChange={e=>setKind(e.target.value)}><option value="all">All systems</option><option value="base">Base</option><option value="engine">Engine</option></select><Pill label={total+" results"}/></div>
    {overview?.groups?.some((g:any)=>g.error)&&<Card title="Connection warnings">{overview.groups.filter((g:any)=>g.error).map((g:any)=><p key={g.repo} className="text-xs text-muted-foreground">{g.repo}: {g.error}</p>)}</Card>}
    <div className="overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">System / Source</th><th className="p-3">Failure</th><th className="p-3">Status</th><th className="p-3">Detected</th><th className="p-3">Action</th></tr></thead><tbody>{rows.map((r:any)=><tr key={r.origin+":"+r.repo+":"+(r.id||r.runId)+":"+(r.jobId||"")} className="border-t border-border"><td className="p-3"><b className="uppercase">{r.kind}</b><p className="max-w-[260px] truncate text-muted-foreground">{r.repo}</p><p className="text-muted-foreground">{r.profile}</p></td><td className="p-3"><b>{r.jobName||r.name||r.workflow||"Failed workflow"}</b><p className="text-muted-foreground">Run #{r.runId}{r.jobId?" · Job #"+r.jobId:""}</p></td><td className="p-3"><Pill label={r.lastValidation?.status||r.ai?.status||r.status||"failed"} ok={r.lastValidation?.status==="validated"}/></td><td className="p-3">{date(r.detectedAt||r.createdAt)}</td><td className="p-3"><div className="flex items-center gap-2"><button className="button-secondary" onClick={()=>void open(r)}>Investigate</button><button type="button" className="button-secondary text-destructive" disabled={Boolean(busy)} onClick={()=>void deleteIncident(r)} title="Remove incident from Repair Centre (keeps GitHub and audit history)">Delete</button></div></td></tr>)}</tbody></table>{!rows.length&&<div className="p-8 text-center text-sm text-muted-foreground">No matching failed jobs. Refresh or check your profile and GitHub connections.</div>}</div>
