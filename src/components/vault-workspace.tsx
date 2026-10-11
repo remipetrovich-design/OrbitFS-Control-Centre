@@ -3,6 +3,7 @@ import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye
 import { getVaultEnvelope, saveVaultEnvelope, clearVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { VaultGithubSync } from "@/components/vault-github-sync";
+import { VaultProviderRecovery } from "@/components/vault-provider-recovery";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
 import { VaultSetupGuide } from "@/components/vault-setup-guide";
 import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, vaultDestinations, type VaultMode } from "@/lib/vault-schema";
@@ -404,14 +405,7 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
     </details>
-    <section className="orbit-panel min-w-0 max-w-full p-4 space-y-3" aria-label="Restore Vault from providers">
-      <h2 className="text-sm font-semibold">Pull / Sync from Providers · restore Vault inventory</h2>
-      <p className="text-xs text-muted-foreground">Read-only recovery after clearing the Vault: reconnect Main/Fallback GitHub or Vercel accounts, load a repository or project, compare its existing names, then select Pull names into Vault. This never deletes, overwrites or changes provider variables.</p>
-      <p className="text-xs text-muted-foreground">GitHub Actions secrets cannot be read back; only names and metadata return as blank Vault references. Vercel Sensitive values are also unreadable. Where Vercel permits it, readable Config values can be imported individually. To restore actual unrecoverable secret values, use your encrypted Vault backup or enter them again.</p>
-      <div className="flex flex-wrap gap-2">
-        {(["GitHub","Vercel"] as const).map(provider=><button key={provider} type="button" className="button-secondary" onClick={()=>{setSyncProvider(provider);setProviderSyncOpen(true);requestAnimationFrame(()=>document.getElementById("vault-provider-sync")?.scrollIntoView({behavior:"smooth",block:"start"}));}}><Download size={14}/> Pull / Sync from {provider}</button>)}
-      </div>
-    </section>
+    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
       <summary className="cursor-pointer text-sm font-semibold">Pull / Send variables · Vercel / GitHub</summary>
       <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
