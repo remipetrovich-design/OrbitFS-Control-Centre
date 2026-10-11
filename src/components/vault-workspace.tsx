@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye, EyeOff, Upload, Download } from "lucide-react";
-import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
+import { getVaultEnvelope, saveVaultEnvelope, clearVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { VaultGithubSync } from "@/components/vault-github-sync";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
@@ -73,6 +73,8 @@ export function VaultWorkspace({session}:{session:any}){
   const [importRows,setImportRows]=useState<VaultRecord[]>([]);
   const [importMode,setImportMode]=useState<"skip"|"override"|"replace-all">("skip");
   const [replaceApproved,setReplaceApproved]=useState(false);
+  const [showClearVault,setShowClearVault]=useState(false);
+  const [clearConfirmation,setClearConfirmation]=useState("");
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [customDestination,setCustomDestination]=useState(false);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
@@ -130,6 +132,21 @@ export function VaultWorkspace({session}:{session:any}){
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setCustomDestination(false);setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
+    finally{setBusy(false)}
+  }
+
+  async function clearVault(){
+    if(clearConfirmation!=="CLEAR VAULT"||!envelope?.updatedAt||busy)return;
+    setBusy(true);setError("");setNotice("");
+    try{
+      await clearVaultEnvelope({data:{token:session.token,confirmation:clearConfirmation,expectedUpdatedAt:envelope.updatedAt}});
+      setRecords([]);setEnvelope(null);setActivePassword("");setPassword("");setConfirm("");
+      setVisible([]);setDraftVisible(false);setImportRows([]);setEditing(null);
+      setDraft(blankDraft());setPendingMigration(null);setCustomDestination(false);
+      setShowClearVault(false);setClearConfirmation("");
+      setPhase("setup");
+      setNotice("The encrypted Vault has been cleared. GitHub, Vercel and all other databases were not changed.");
+    }catch(e:any){setError(e?.message||"Could not clear the Vault. No reset was confirmed.")}
     finally{setBusy(false)}
   }
 
@@ -397,6 +414,22 @@ export function VaultWorkspace({session}:{session:any}){
     </details>
     <details className="orbit-panel min-w-0 max-w-full p-4 space-y-3">
       <summary className="cursor-pointer text-sm font-semibold">Recovery / Configuration / Setup</summary>
+      <div className="mt-4 rounded-lg border border-red-500/40 p-3 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Clear encrypted Vault entries</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Removes every Vault entry, including saved account connections, and returns Vault to PIN setup. This does not delete any secrets already on GitHub or Vercel.</p>
+        </div>
+        {!showClearVault?<button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(true);setClearConfirmation("");}}><Trash2 size={14}/> Clear Vault…</button>:
+        <div className="space-y-2">
+          <label className="block text-xs font-medium" htmlFor="vault-clear-confirm">Type CLEAR VAULT to confirm deletion of all {records.length} saved entries</label>
+          <input id="vault-clear-confirm" className="control w-full" autoComplete="off" spellCheck={false} value={clearConfirmation} onChange={e=>setClearConfirmation(e.target.value)} placeholder="CLEAR VAULT"/>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="button-secondary" disabled={busy||clearConfirmation!=="CLEAR VAULT"} onClick={()=>void clearVault()}>{busy?"Clearing…":"Delete all Vault entries"}</button>
+            <button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(false);setClearConfirmation("");}}>Cancel</button>
+          </div>
+        </div>}
+      </div>
+
 
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
       <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
