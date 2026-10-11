@@ -233,7 +233,7 @@ export const getAiRepairControls=createServerFn({method:"POST"}).handler(async({
   repairDbRead("repair_ai_usage?select=id&usage_day=eq."+new Date().toISOString().slice(0,10)),
   repairDbRead("repair_incidents?select=id&profile=eq."+profile+"&archived_at=is.null")
  ]);
- return {profile,connected:true,settings,counts:{aiUsedToday:usage.length,storedIncidents:incidents.length},workerDispatchConfigured:Boolean(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN)};
+ return {profile,connected:true,settings,counts:{aiUsedToday:usage.length,storedIncidents:incidents.length},workerDispatchConfigured:Boolean(workerGithubToken())};
 });
 export const saveAiRepairControls=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;settings:RepairSettings}})=>{
  requireOwner(data.token);
