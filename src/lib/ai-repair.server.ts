@@ -90,7 +90,8 @@ export const getAiRepairIncidents=createServerFn({method:"POST"}).handler(async(
  const selection=await active();
  if(!process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY)return {incidents:[],historyAvailable:false};
  const key=String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY);
- const root="https://ffmfogljikvybzgunauo.supabase.co/rest/v1/repair_incidents?profile=eq."+(selection.profile==="primary"?"main":"fallback")+"&order=detected_at.desc&limit=150";
+ const policy=(await repairSettings()).settings;
+ const root="https://ffmfogljikvybzgunauo.supabase.co/rest/v1/repair_incidents?profile=eq."+(selection.profile==="primary"?"main":"fallback")+"&archived_at=is.null&order=detected_at.desc&limit="+(policy?.incident_page_size||100);
  const response=await fetch(root,{headers:{apikey:key,Authorization:"Bearer "+key},cache:"no-store",signal:AbortSignal.timeout(8000)});
  if(!response.ok)throw new Error("Repair history lookup failed: "+response.status);
  const rows=await response.json();
@@ -105,7 +106,7 @@ export const getAiRepairIncident=createServerFn({method:"POST"}).handler(async({
  if(!key)throw new Error("Repair history is not connected");
  const headers={apikey:key,Authorization:"Bearer "+key};
  const fetchRows=async(url:string)=>{const r=await fetch("https://ffmfogljikvybzgunauo.supabase.co/rest/v1/"+url,{headers,cache:"no-store",signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error("Repair history lookup: "+r.status);return await r.json()};
- const rows=await fetchRows("repair_incidents?id=eq."+encodeURIComponent(data.incidentId)+"&limit=1");
+ const rows=await fetchRows("repair_incidents?id=eq."+encodeURIComponent(data.incidentId)+"&archived_at=is.null&limit=1");
  const row=rows?.[0];if(!row||row.profile!==(selection.profile==="primary"?"main":"fallback"))throw new Error("Incident unavailable in active profile");
  const diagnosed=row.fingerprint?await fetchRows("repair_diagnoses?repository=eq."+encodeURIComponent(row.repository)+"&fingerprint=eq."+encodeURIComponent(row.fingerprint)+"&origin=eq.openrouter&limit=1"):[];
  const diagnosis=diagnosed?.[0]||null;
@@ -201,8 +202,9 @@ export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async(
 });
 
 
-type RepairSettings={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string};
-const REPAIR_SETTINGS_FIELDS=["enabled","auto_diagnose","enable_base","enable_engine","enable_release_worker","enable_sql_diagnosis"] as const;
+type RepairSettings={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
+const REPAIR_SETTINGS_FIELDS=["enabled","auto_diagnose","enable_base","enable_engine","enable_release_worker","enable_sql_diagnosis","show_github_failures"] as const;
+function workerGithubToken(){return String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.ORBITFS_FALLBACK_GITHUB_TOKEN||"").trim();}
 function repairDbKey(){return String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"").trim();}
 async function repairDbRead(path:string,options?:{method:"GET"|"POST";body?:object}){
  const key=repairDbKey();
@@ -224,11 +226,11 @@ export const getAiRepairControls=createServerFn({method:"POST"}).handler(async({
  const selection=await active();
  const profile=selection.profile==="primary"?"main":"fallback";
  const connected=Boolean(repairDbKey());
- if(!connected)return {profile,connected:false,settings:null,counts:null,workerDispatchConfigured:Boolean(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN),message:"Set the Dev Panel server-side REPAIR_SUPABASE_SERVICE_ROLE_KEY on the correct Vercel project."};
+ if(!connected)return {profile,connected:false,settings:null,counts:null,workerDispatchConfigured:Boolean(workerGithubToken()),message:"Set the Dev Panel server-side REPAIR_SUPABASE_SERVICE_ROLE_KEY on the correct Vercel project."};
  const [{settings},usage,incidents]=await Promise.all([
   repairSettings(),
   repairDbRead("repair_ai_usage?select=id&usage_day=eq."+new Date().toISOString().slice(0,10)),
-  repairDbRead("repair_incidents?select=id&profile=eq."+profile)
+  repairDbRead("repair_incidents?select=id&profile=eq."+profile+"&archived_at=is.null")
  ]);
  return {profile,connected:true,settings,counts:{aiUsedToday:usage.length,storedIncidents:incidents.length},workerDispatchConfigured:Boolean(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN)};
 });
@@ -243,7 +245,10 @@ export const saveAiRepairControls=createServerFn({method:"POST"}).handler(async(
  if(!Number.isInteger(input.daily_ai_limit)||input.daily_ai_limit<1||input.daily_ai_limit>5)throw Error("Daily AI limit must be 1–5");
  const model=String(input.model||"");
  if(model!=="openrouter/free"&&!/^[a-zA-Z0-9._/-]+:free$/.test(model))throw Error("Only OpenRouter free models allowed");
+ if(!Number.isInteger(input.auto_archive_days)||input.auto_archive_days<0||input.auto_archive_days>365)throw Error("Auto-archive days must be 0–365");
+ if(!Number.isInteger(input.incident_page_size)||input.incident_page_size<20||input.incident_page_size>300)throw Error("Incident page size must be 20–300");
  cleaned.lookback_hours=input.lookback_hours;cleaned.daily_ai_limit=input.daily_ai_limit;cleaned.model=model;
+ cleaned.auto_archive_days=input.auto_archive_days;cleaned.incident_page_size=input.incident_page_size;
  const saved=await repairDbRead("rpc/repair_update_settings",{method:"POST",body:{p_profile:profile,p_settings:cleaned}});
  return {profile,settings:saved,updated:true};
 });
@@ -251,12 +256,21 @@ export const requestAiRepairWorkerCheck=createServerFn({method:"POST"}).handler(
  requireOwner(data.token);
  const selection=await active();
  if(data.verifyOnly!==true)throw Error("Only read-only worker verification can be dispatched here");
- const token=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
- if(!token)throw Error("AI_REPAIR_WORKER_GITHUB_TOKEN is not configured on this Dev Panel server");
+ const token=workerGithubToken();
+ if(!token)throw Error("No GitHub token for the AI Repair worker. Set AI_REPAIR_WORKER_GITHUB_TOKEN with Actions: Write on the repair repository.");
  const response=await fetch("https://api.github.com/repos/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml/dispatches",{
   method:"POST",headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
   body:JSON.stringify({ref:"main",inputs:{verify_only:true}}),signal:timeout()
  });
  if(!response.ok)throw Error("Verification dispatch failed: HTTP "+response.status);
  return {dispatched:true,url:"https://github.com/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml",profile:selection.profile};
+});
+
+export const archiveAiRepairIncident=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;confirm:string}})=>{
+ requireOwner(data.token);
+ if(data.confirm!=="DELETE_FROM_REPAIR_CENTRE")throw Error("Explicit delete confirmation required");
+ if(!/^[a-f0-9]{20,64}$/.test(data.incidentId))throw Error("Invalid incident ID");
+ const profile=(await active()).profile==="primary"?"main":"fallback";
+ const success=await repairDbRead("rpc/repair_archive_incident",{method:"POST",body:{p_incident_id:data.incidentId,p_profile:profile}});
+ return {deleted:success===true,profile,preservesAudit:true,preservesGitHub:true};
 });
