@@ -1,5 +1,5 @@
 import {useMemo,useState} from "react";
-import {RefreshCw,ShieldCheck,Upload} from "lucide-react";
+import {RefreshCw,ShieldCheck} from "lucide-react";
 import type {VaultRecord} from "@/lib/vault-crypto";
 import {bestVaultConnection,usableConnectionValue} from "@/lib/vault-connections";
 import {vaultDestinations,type VaultMode} from "@/lib/vault-schema";
@@ -39,9 +39,6 @@ export function VaultVercelSyncAll({session,records,onPersist}:{
  const token=(mode:Account)=>bestVaultConnection(records,"VERCEL_TOKEN_"+mode.toUpperCase())?.secret||"";
  const team=(mode:Account)=>bestVaultConnection(records,"VERCEL_TEAM_ID_"+mode.toUpperCase())?.secret||TEAMS[mode];
  const fp=()=>JSON.stringify(records.map(r=>[r.id,r.service,r.keyName,r.secret,r.usedIn,r.destinationSystems,r.destinationSystem,r.vercelTargets]));
- const targetRecords=useMemo(()=>records.filter(r=>r.service==="Vercel"&&r.usedIn?.some(m=>modes[m])&&
-   vaultDestinations(r).length>0&&!/^(VERCEL_(TOKEN|TEAM_ID)|GITHUB_TOKEN)_(MAIN|FALLBACK)$/.test(r.keyName)),
-   [records,modes]);
  const groups=useMemo(()=>candidates.reduce<Record<string,Candidate[]>>((result,item)=>{
    const key=item.mode+" / "+item.projectName;
    (result[key]??=[]).push(item);return result;
