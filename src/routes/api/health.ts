@@ -1,5 +1,6 @@
 import {createFileRoute} from "@tanstack/react-router";
 import {createClient} from "@supabase/supabase-js";
+import {localGithubProfileName} from "@/lib/github-profile";
 
 // Read-only dependency check. Do not return credentials, usernames or
 // upstream error bodies. This is safe for monitoring without logging in.
@@ -29,11 +30,11 @@ export const Route=createFileRoute("/api/health")({
     try{
      const base=String(process.env.LICENSE_MASTER_URL||"").trim();
      const api=new URL(base);
-     if(api.protocol!=="https:"||api.hostname!=="lm.incendiarynetworks.cc"||api.pathname!=="/api/v1"||api.username||api.password||api.search||api.hash){
-      throw new Error("Fallback API origin is not configured");
+     if(api.protocol!=="https:"||(localGithubProfileName()==="fallback"&&api.hostname!=="lm.incendiarynetworks.cc")||api.pathname!=="/api/v1"||api.username||api.password||api.search||api.hash){
+      throw new Error("License Manager API origin is not configured for this mode");
      }
      const token=String(process.env.LICENSE_MASTER_API_TOKEN||"").trim();
-     if(!token)throw new Error("Fallback API token is missing");
+     if(!token)throw new Error("License Manager API token is missing");
      const [channels,profile]=await Promise.all([
       fetch(api.origin+"/api/v1/release-channels",{headers:{authorization:"Bearer "+token},cache:"no-store",signal:AbortSignal.timeout(7500)}),
       fetch(api.origin+"/api/v1/github-profile",{cache:"no-store",signal:AbortSignal.timeout(7500)})
@@ -48,9 +49,9 @@ export const Route=createFileRoute("/api/health")({
       sourceMode=body?.profile==="fallback"?"fallback":body?.profile==="primary"?"primary":"unavailable";
      }
     }catch{}
-    const ok=database==="ready"&&licenseManager==="ready"&&sourceMode==="fallback";
+    const ok=database==="ready"&&licenseManager==="ready"&&sourceMode===localGithubProfileName();
     return Response.json(
-     {ok,service:"fallback-dev-panel",database,license_manager_api:licenseManager,source_mode:sourceMode},
+     {ok,service:localGithubProfileName()==="fallback"?"fallback-dev-panel":"main-dev-panel",database,license_manager_api:licenseManager,source_mode:sourceMode},
      {status:ok?200:503,headers}
     );
    }
