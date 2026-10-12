@@ -15,24 +15,25 @@ const PRIMARY:GithubProfile={
  name:"primary",
  owner:"lucaskerim123",
  tokenEnv:"ORBITFS_RELEASE_DISPATCH_TOKEN",
- base:{repo:process.env.PRIMARY_BASE_RELEASE_REPO||process.env.BASE_RELEASE_REPO||"lucaskerim123/V1-vercel-base",branch:"main",releaseRef:process.env.PRIMARY_BASE_RELEASE_REF||process.env.BASE_RELEASE_REF||"base-release"},
- engine:{repo:process.env.PRIMARY_ENGINE_RELEASE_REPO||process.env.ENGINE_RELEASE_REPO||"lucaskerim123/V1-vercel-engine",branch:"main",releaseRef:process.env.PRIMARY_ENGINE_RELEASE_REF||process.env.ENGINE_RELEASE_REF||"UPDATE_RELEASE",baselineRef:process.env.PRIMARY_ENGINE_BASELINE_REF||process.env.ENGINE_BASELINE_REF||"main"},
- devPanel:{repo:process.env.PRIMARY_DEV_PANEL_REPO||"lucaskerim123/Dev-panel",branch:"main"},
- licenseManager:{repo:process.env.PRIMARY_LICENSE_MANAGER_REPO||process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",branch:"main"},
- billingStore:{repo:process.env.PRIMARY_BILLING_STORE_REPO||process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",branch:"main"}
+ base:{repo:"lucaskerim123/V1-vercel-base",branch:"main",releaseRef:process.env.PRIMARY_BASE_RELEASE_REF||process.env.BASE_RELEASE_REF||"base-release"},
+ engine:{repo:"lucaskerim123/V1-vercel-engine",branch:"main",releaseRef:process.env.PRIMARY_ENGINE_RELEASE_REF||process.env.ENGINE_RELEASE_REF||"UPDATE_RELEASE",baselineRef:process.env.PRIMARY_ENGINE_BASELINE_REF||process.env.ENGINE_BASELINE_REF||"main"},
+ devPanel:{repo:"lucaskerim123/Dev-panel",branch:"main"},
+ licenseManager:{repo:"lucaskerim123/Custom-licence-manager",branch:"main"},
+ billingStore:{repo:"lucaskerim123/V2_Billing_Store",branch:"main"}
 };
 
 const FALLBACK:GithubProfile={
  name:"fallback",
  owner:"remipetrovich-design",
  tokenEnv:"ORBITFS_FALLBACK_GITHUB_TOKEN",
- base:{repo:process.env.FALLBACK_BASE_RELEASE_REPO||"remipetrovich-design/OrbitFS-Base-System",branch:"main",releaseRef:process.env.FALLBACK_BASE_RELEASE_REF||"base-release"},
- engine:{repo:process.env.FALLBACK_ENGINE_RELEASE_REPO||"remipetrovich-design/OrbitFS_Engine",branch:"main",releaseRef:"UPDATE_RELEASE",baselineRef:process.env.FALLBACK_ENGINE_BASELINE_REF||"main"},
- devPanel:{repo:process.env.FALLBACK_DEV_PANEL_REPO||"remipetrovich-design/OrbitFS-Control-Centre",branch:"main"},
- licenseManager:{repo:process.env.FALLBACK_LICENSE_MANAGER_REPO||"remipetrovich-design/OrbitFS-License-Administration",branch:"main"},
- billingStore:{repo:process.env.FALLBACK_BILLING_STORE_REPO||"remipetrovich-design/OrbitFS-Billing-Shopfront",branch:"main"}
+ base:{repo:"remipetrovich-design/OrbitFS-Base-System",branch:"main",releaseRef:process.env.FALLBACK_BASE_RELEASE_REF||"base-release"},
+ engine:{repo:"remipetrovich-design/OrbitFS_Engine",branch:"main",releaseRef:"UPDATE_RELEASE",baselineRef:process.env.FALLBACK_ENGINE_BASELINE_REF||"main"},
+ devPanel:{repo:"remipetrovich-design/OrbitFS-Control-Centre",branch:"main"},
+ licenseManager:{repo:"remipetrovich-design/OrbitFS-License-Administration",branch:"main"},
+ billingStore:{repo:"remipetrovich-design/OrbitFS-Billing-Shopfront",branch:"main"}
 };
 
+// Repository identities are immutable and cannot be redirected by environment overrides.
 // Runtime/release operations are permanently bound to this repository family.
 // The persisted profile switch only decides which family is allowed to run.
 const LOCAL_PROFILE:GithubProfile=FALLBACK;
