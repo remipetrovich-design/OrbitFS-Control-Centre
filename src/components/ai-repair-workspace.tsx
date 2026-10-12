@@ -161,7 +161,7 @@ export function AiRepairWorkspace({session}:{session:any}){
     const matching=(history?.incidents||[]).filter((x:any)=>x.repo===repairTracking.repo&&Number(x.runId)===repairTracking.runId);
     if(history){setIncidents(history.incidents||[]);setArchivedRuns(history.archivedRuns||[])}
     const started=new Date(repairTracking.startedAt).getTime();
-    const workerRuns=(status.runs||[]).filter((x:any)=>new Date(x.createdAt||x.startedAt||0).getTime()>=started-60000);
+    const workerRuns=(status.runs||[]).filter((x:any)=>new Date(x.createdAt||x.startedAt||0).getTime()>=started-60000&&String(x.displayTitle||"").includes(repairTracking.repo+" #"+repairTracking.runId));
     const latest=workerRuns.sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime())[0];
     setRepairProgress({worker:latest||null,incidents:matching,checkedAt:new Date().toISOString(),available:status.available});
     setRepairProgressError("");
