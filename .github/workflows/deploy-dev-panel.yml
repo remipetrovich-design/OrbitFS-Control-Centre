@@ -190,4 +190,10 @@ jobs:
 
       - name: Deploy production
         if: steps.profile.outputs.deploy == 'true'
-        run: vercel deploy --prebuilt --archive=tgz --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
+        run: |
+          set -euo pipefail
+          github_org="${GITHUB_REPOSITORY%%/*}"
+          github_repo="${GITHUB_REPOSITORY#*/}"
+          vercel deploy --prebuilt --archive=tgz --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE" \
+            --meta "githubCommitSha=$GITHUB_SHA" --meta "githubCommitRef=main" \
+            --meta "githubOrg=$github_org" --meta "githubRepo=$github_repo"
