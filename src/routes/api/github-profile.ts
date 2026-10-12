@@ -1,8 +1,11 @@
 import {createFileRoute} from "@tanstack/react-router";
+import {localGithubProfileName} from "@/lib/github-profile";
 
 function licenseManagerProfileUrl(){
  const base=String(process.env.LICENSE_MASTER_URL||"").trim().replace(/\/+$/,"");
- if(base!=="https://lm.incendiarynetworks.cc/api/v1")throw new Error("Fallback License Manager URL is not configured correctly");
+ const url=new URL(base);
+ if(url.protocol!=="https:"||url.pathname!=="/api/v1"||url.username||url.password||url.search||url.hash||
+   (localGithubProfileName()==="fallback"&&url.hostname!=="lm.incendiarynetworks.cc"))throw new Error("License Manager URL is not configured correctly for this Dev Panel mode");
  return base+"/github-profile";
 }
 
