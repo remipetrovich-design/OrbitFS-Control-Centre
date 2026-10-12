@@ -41,24 +41,31 @@ let profileCache:{name:GithubProfileName;expires:number}|null=null;
 
 async function storedProfileName():Promise<GithubProfileName>{
  if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
- const rawBase=String(process.env.LICENSE_MASTER_URL||"").trim().replace(/\/+$/,"");
- if(rawBase!=="https://lm.incendiarynetworks.cc/api/v1")throw new Error("Fallback License Manager URL must be configured before checking source mode.");
- const base=rawBase.endsWith("/api")?rawBase+"/v1":rawBase;
- try{
-  const response=await fetch(base+"/github-profile",{cache:"no-store",signal:AbortSignal.timeout(5000)});
-  if(!response.ok)throw new Error("License Manager profile endpoint returned "+response.status);
-  const body=await response.json();
-  const raw=String(body?.profile||"").trim().toLowerCase();
-  if(raw!=="primary"&&raw!=="fallback")throw new Error("License Manager source profile is invalid or missing.");
-  const name=raw as GithubProfileName;
-  profileCache={name,expires:Date.now()+10000};
-  return name;
- }catch(error){
-  // Fail closed: never select the former account from stale cache or a local
-  // environment variable if License Manager source authority is unreachable.
+ const sources=[
+  'https://incendiarynetworks.cc/api/v1/source-configuration',
+  'https://lm.incendiarynetworks.cc/api/v1/source-configuration',
+ ] as const;
+ const confirmed:GithubProfileName[]=[];
+ for(const endpoint of sources){
+  try{
+   const response=await fetch(endpoint,{cache:"no-store",signal:AbortSignal.timeout(5000)});
+   if(!response.ok)continue;
+   const body=await response.json() as {mode?:string};
+   if(body.mode==="main")confirmed.push("primary");
+   else if(body.mode==="fallback")confirmed.push("fallback");
+  }catch{/* An inactive License Manager may be paused by Vercel. */}
+ }
+ if(!confirmed.length){
   profileCache=null;
   throw new Error("License Manager source mode cannot be verified. Production GitHub operations are blocked.");
  }
+ if(confirmed.some(name=>name!==confirmed[0])){
+  profileCache=null;
+  throw new Error("License Manager source authorities disagree. Production GitHub operations are blocked.");
+ }
+ const name=confirmed[0];
+ profileCache={name,expires:Date.now()+10000};
+ return name;
 }
 
 export function clearGithubProfileCache(){profileCache=null;}
