@@ -33,6 +33,9 @@ export function AiRepairWorkspace({session}:{session:any}){
  const [liveBusy,setLiveBusy]=useState(false);
  const [liveAutoRefresh,setLiveAutoRefresh]=useState(true);
  const [liveCheckedAt,setLiveCheckedAt]=useState("");
+ const [repairTracking,setRepairTracking]=useState<{repo:string;runId:number;startedAt:string;workerUrl:string}|null>(null);
+ const [repairProgress,setRepairProgress]=useState<any>(null);
+ const [repairProgressError,setRepairProgressError]=useState("");
  const liveInFlight=useRef(false);
  const token=session.token;
  const load=useCallback(async()=>{
@@ -68,8 +71,9 @@ export function AiRepairWorkspace({session}:{session:any}){
   setBusy("request-repair");setError("");
   try{
    const result=await requestAiRepairRunDiagnosis({data:{token,repo:selected.repo,runId:Number(selected.runId),confirm:"REQUEST_AI_REPAIR"}});
-   setNotice("Repair request sent to GitHub Actions for "+result.repo+" run #"+result.runId+". Refresh incidents after the job finishes to view the saved diagnosis.");
-   window.open(result.workerUrl,"_blank","noopener,noreferrer");
+   setRepairTracking({repo:result.repo,runId:Number(result.runId),startedAt:new Date().toISOString(),workerUrl:result.workerUrl});
+   setRepairProgress(null);setRepairProgressError("");
+   setNotice("Diagnosis submitted. Live worker progress is now shown below. A diagnosis does not apply a fix or retry packaging.");
   }catch(e:any){setError(e.message||"Unable to send run to AI Repair worker")}
   finally{setBusy("")}
  }
@@ -146,6 +150,27 @@ export function AiRepairWorkspace({session}:{session:any}){
   const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refreshLive()},20000);
   return()=>window.clearInterval(timer);
  },[section,liveAutoRefresh,refreshLive]);
+ useEffect(()=>{
+  if(!repairTracking)return;
+  let cancelled=false;
+  const check=async()=>{
+   if(document.visibilityState!=="visible")return;
+   try{
+    const [status,history]=await Promise.all([getAiRepairLiveActions({data:{token}}),getAiRepairIncidents({data:{token}}).catch(()=>null)]);
+    if(cancelled)return;
+    const matching=(history?.incidents||[]).filter((x:any)=>x.repo===repairTracking.repo&&Number(x.runId)===repairTracking.runId);
+    if(history){setIncidents(history.incidents||[]);setArchivedRuns(history.archivedRuns||[])}
+    const started=new Date(repairTracking.startedAt).getTime();
+    const workerRuns=(status.runs||[]).filter((x:any)=>new Date(x.createdAt||x.startedAt||0).getTime()>=started-60000);
+    const latest=workerRuns.sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime())[0];
+    setRepairProgress({worker:latest||null,incidents:matching,checkedAt:new Date().toISOString(),available:status.available});
+    setRepairProgressError("");
+   }catch(e:any){if(!cancelled)setRepairProgressError(e?.message||"Worker status unavailable")}
+  };
+  void check();
+  const timer=window.setInterval(()=>void check(),10000);
+  return()=>{cancelled=true;window.clearInterval(timer)};
+ },[repairTracking,token]);
  const total=rows.length;
  const current=overview?.selection;
  const available=Boolean(service?.available);
@@ -201,10 +226,18 @@ export function AiRepairWorkspace({session}:{session:any}){
   {section==="workspace"&&<div className="space-y-3"><button className="button-secondary" onClick={()=>setSection("incidents")}>← Back to incidents</button>
    {!selected?<Card title="Choose a failed job"><p className="text-sm text-muted-foreground">Select a failed incident to inspect its errors and source.</p><button className="button-secondary" onClick={()=>setSection("incidents")}>Open incidents</button></Card>:<>
     <Card title="Source and failure identity"><div className="flex flex-wrap gap-2"><Pill label={selected.profile||"Profile unknown"}/><Pill label={selected.kind||"System"}/><Pill label={selected.classification||"Failure"}/></div><p className="break-all text-xs">{selected.repo}</p><p className="text-xs text-muted-foreground">Commit: {selected.sha} · Run #{selected.runId}</p><div className="flex flex-wrap items-center gap-2"><button type="button" className="button-primary" disabled={Boolean(busy)||!selected.runId} onClick={()=>void submitAiRepair()}><Wrench size={14}/> Send to AI Repair</button><button type="button" className="button-secondary text-destructive" disabled={Boolean(busy)} onClick={()=>void deleteIncident(selected)}>Delete from Repair Centre</button></div>{selected.runUrl||selected.url?<a className="inline-flex items-center gap-1 text-xs underline" href={selected.runUrl||selected.url} target="_blank" rel="noreferrer">View GitHub workflow <ExternalLink size={12}/></a>:null}<div><button className="button-secondary inline-flex items-center gap-2" disabled={Boolean(busy)||!selected.sha||!([overview?.selection?.baseRepo,overview?.selection?.engineRepo].includes(selected.repo))} onClick={()=>void startChecks()}><Terminal size={13}/> Run GitHub source checks</button></div></Card>
+    {repairTracking&&repairTracking.repo===selected.repo&&repairTracking.runId===Number(selected.runId)&&<Card title="Submitted repair — live progress">
+      <div className="flex flex-wrap items-center gap-2"><Pill label={repairProgress?.worker?.conclusion||repairProgress?.worker?.status||"Waiting for worker run"}/><span className="text-xs text-muted-foreground">Last checked: {date(repairProgress?.checkedAt)}</span><a className="text-xs underline" href={repairProgress?.worker?.url||repairTracking.workerUrl} target="_blank" rel="noreferrer">Open GitHub Actions</a></div>
+      {repairProgressError&&<p role="alert" className="text-xs text-destructive">{repairProgressError}</p>}
+      {!repairProgress?.worker&&<p className="text-xs text-muted-foreground">Dispatch accepted; GitHub has not returned a new worker run yet. Refreshing every 10 seconds while this page is open.</p>}
+      {(repairProgress?.worker?.jobs||[]).map((job:any)=><div key={job.id} className="rounded-md border border-border p-2 space-y-1"><p className="text-xs font-semibold">{job.name} · {job.conclusion||job.status}</p>{(job.steps||[]).map((step:any)=><p key={step.number} className="text-xs text-muted-foreground">{step.number}. {step.name} — {step.conclusion||step.status}</p>)}</div>)}
+      {repairProgress?.incidents?.length>0?<div className="space-y-2">{repairProgress.incidents.map((item:any)=><div key={item.id} className="rounded-md border border-border p-2 text-xs"><p>Diagnosis saved: {item.classification||item.status||"pending"}</p><button className="button-secondary mt-2" onClick={()=>void open({...item,origin:"stored"})}>View diagnosis / proposed fix</button></div>)}</div>:<p className="text-xs text-muted-foreground">No diagnosis record for this run has appeared yet.</p>}
+      <p className="text-xs text-muted-foreground">This worker currently diagnoses only. Source changes, validation, retry of packaging and publication are not automatic.</p>
+    </Card>}
     {detail?.jobs?.length>0&&<Card title="Failed jobs">{detail.jobs.filter((j:any)=>j.conclusion==="failure").map((j:any)=><div key={j.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3"><div><b className="text-sm">{j.name}</b><p className="text-xs text-muted-foreground">{(j.failedSteps||[]).join(", ")||"Failed"}</p></div><button className="button-secondary" disabled={Boolean(busy)} onClick={()=>void getLog(j.id)}>Load error log</button></div>)}</Card>}
     <Card title="Error console"><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-[11px]">{log||"Select a failed job to fetch its error log, or open a stored incident."}</pre></Card>
     {incidentDetail&&<Card title="Local diagnosis"><div className="flex flex-wrap gap-2"><Pill label={incidentDetail.diagnosis?.classification||"Unknown"}/><Pill label={"Confidence: "+(incidentDetail.diagnosis?.confidence||"low")}/>{(incidentDetail.diagnosis?.components||[]).map((x:string)=><Pill key={x} label={x}/>)}</div><p className="text-sm">{incidentDetail.diagnosis?.recommendation}</p>{incidentDetail.incident?.ai&&<div className="rounded-lg border border-border p-3 text-xs"><b>OpenRouter: {incidentDetail.incident.ai.status}</b>{incidentDetail.incident.ai.diagnosis?.summary&&<p className="mt-2">{incidentDetail.incident.ai.diagnosis.summary}</p>}{incidentDetail.incident.ai.similarTo&&<p className="mt-1 text-muted-foreground">Similar previous failure {incidentDetail.incident.ai.similarTo}; no additional model call used.</p>}</div>}<div className="flex flex-wrap gap-2"><Copy text={incidentDetail.copyForAI||""}/><button className="button-secondary" disabled={Boolean(busy)} onClick={()=>void loadSource()}><FileCode2 size={13}/> Fetch source context</button><button className="button-primary" disabled={!available||Boolean(busy)} onClick={()=>void diagnose()}><Zap size={13}/> Request AI diagnosis</button></div>{!available&&<p className="text-xs text-muted-foreground">AI requires the Repair Centre backend. No request is sent until connected and confirmed.</p>}</Card>}
-    {selected.origin!=="stored"&&<Card title="AI repair request"><p className="text-sm text-muted-foreground">Click **Send to AI Repair** above to request automatic diagnosis through GitHub Actions. The worker will save the diagnosis and proposed repair to the dedicated database. No automatic source modification, SQL execution or release publication occurs.</p><Copy text={["OrbitFS failed release",selected.repo,"Commit: "+selected.sha,"Run: "+selected.runId,"Log:",log,"Keep License Manager approval and manual Billing publication"].join("\n")}/></Card>}
+    {selected.origin!=="stored"&&<Card title="AI repair request"><p className="text-sm text-muted-foreground">Use Send to AI Repair above to dispatch a diagnosis and watch its GitHub Actions steps here. The worker will save the diagnosis and proposed repair to the dedicated database. No automatic source modification, SQL execution or release publication occurs.</p><Copy text={["OrbitFS failed release",selected.repo,"Commit: "+selected.sha,"Run: "+selected.runId,"Log:",log,"Keep License Manager approval and manual Billing publication"].join("\n")}/></Card>}
     {proposal&&<Card title="Proposed repair — not yet applied"><p className="text-sm">{proposal.diagnosis}</p><div className="space-y-2">{(proposal.files||[]).map((f:any,i:number)=><details key={i} className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-xs font-semibold">{f.path}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-[11px]">{f.content}</pre></details>)}</div><button className="button-primary" disabled={!available||!proposal.files?.length||Boolean(busy)} onClick={()=>void validate()}><ShieldCheck size={14}/> Validate in sandbox</button></Card>}
     {validation&&<Card title="Sandbox validation result"><Pill label={validation.status} ok={validation.status==="validated"}/>{(validation.steps||[]).map((step:any,i:number)=><details key={i} className="rounded border border-border p-2"><summary className="cursor-pointer text-xs">{step.ok?"Passed":"Failed"} · {step.name}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-[11px]">{step.output}</pre></details>)}<p className="text-xs text-muted-foreground">Source push: No · Release publication: Manual only</p></Card>}
     {busy&&<p className="inline-flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="animate-spin" size={13}/> {busy}…</p>}
