@@ -29,14 +29,17 @@ const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`
 // where process.env.LICENSE_MASTER_URL is intentionally unavailable.
 function trustedMasterBootstrapUrl():string{
  const value=normalizeOfficialMasterUrl(required("LICENSE_MASTER_URL"));
- if(!value)throw new Error("Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1");
+ if(!value)throw new Error(localGithubProfileName()==="fallback"
+  ?"Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1"
+  :"Main LICENSE_MASTER_URL must be a valid HTTPS License Manager /api/v1 endpoint");
  return value;
 }
 function normalizeOfficialMasterUrl(value:string){
  try{
   const u=new URL(String(value||"").trim());
   const host=u.hostname.toLowerCase(),path=u.pathname.replace(/\/+$/,"");
-  if(u.protocol!=="https:"||host!=="lm.incendiarynetworks.cc"||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
+  if(u.protocol!=="https:"||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
+  if(localGithubProfileName()==="fallback"&&host!=="lm.incendiarynetworks.cc")return null;
   return u.origin+"/api/v1";
  }catch{return null}
 }
@@ -55,7 +58,7 @@ async function officialMasterConnections(force=false){
     .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
   }
  }catch{}
- if(!connections.length)connections=[{service_key:"license_manager",label:"Fallback License Manager API",base_url:trustedMasterBootstrapUrl(),enabled:true,priority:10,settings:{bootstrap:true}}];
+ if(!connections.length)connections=[{service_key:"license_manager",label:localGithubProfileName()==="fallback"?"Fallback License Manager API":"Main License Manager API",base_url:trustedMasterBootstrapUrl(),enabled:true,priority:10,settings:{bootstrap:true}}];
  connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
  officialApiRegistryCache={expires:Date.now()+20*60*1000,connections};
  return connections;
@@ -387,17 +390,17 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
 export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
  const official=await officialMasterConnections(true);
- return {authority:"orbitfs-license-manager",bootstrapUrl:trustedMasterBootstrapUrl(),selectedUrl:trustedMasterBootstrapUrl(),officialConnections:official,connection:{service_key:"license_manager",selected_url:trustedMasterBootstrapUrl(),managed_by:"fallback_vercel_environment"}};
+ return {authority:"orbitfs-license-manager",bootstrapUrl:trustedMasterBootstrapUrl(),selectedUrl:trustedMasterBootstrapUrl(),officialConnections:official,connection:{service_key:"license_manager",selected_url:trustedMasterBootstrapUrl(),managed_by:localGithubProfileName()==="fallback"?"fallback_vercel_environment":"main_vercel_environment"}};
 });
 
 export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required");
  const requested=normalizeOfficialMasterUrl(data.url);
- if(!requested||requested!==trustedMasterBootstrapUrl())throw new Error("Fallback Dev Panel is pinned to the configured Fallback License Manager API. Change LICENSE_MASTER_URL in the Fallback Vercel project to update it.");
+ if(!requested||requested!==trustedMasterBootstrapUrl())throw new Error("Dev Panel API must match this mode\'s configured LICENSE_MASTER_URL.");
  const official=await officialMasterConnections(true);
- if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("Fallback License Manager is not present in the official API registry.");
- return {ok:true,selectedUrl:trustedMasterBootstrapUrl(),managedBy:"fallback_vercel_environment"};
+ if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("License Manager is not present in the official API registry.");
+ return {ok:true,selectedUrl:trustedMasterBootstrapUrl(),managedBy:localGithubProfileName()==="fallback"?"fallback_vercel_environment":"main_vercel_environment"};
 });
 
 export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string}})=>{
@@ -408,7 +411,7 @@ export const testApiConnection=createServerFn({method:"POST"}).handler(async({da
  if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
  const started=Date.now();
  const health=await requestJson(requested+"/license/health",{cache:"no-store"});
- if(health?.ok!==true)throw new Error("Fallback License Manager health check did not pass.");
+ if(health?.ok!==true)throw new Error("License Manager health check did not pass.");
  // The health endpoint is public and cannot verify machine credentials.
  // Check a read-only endpoint using the real server-side token before reporting success.
  const channels=await requestJson(requested+"/release-channels?include_disabled=false",{
