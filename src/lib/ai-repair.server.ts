@@ -79,7 +79,7 @@ export const getAiRepairLiveActions=createServerFn({method:"POST"}).handler(asyn
  const display=[...activeRuns,...all.filter((run:any)=>!activeStatuses.has(String(run.status||"").toLowerCase())).slice(0,5)].slice(0,12);
  const entries=await Promise.allSettled(display.map(async(run:any)=>{
   const jobs=await get("/actions/runs/"+run.id+"/jobs?per_page=100");
-  return {id:run.id,workflow:run.name,status:run.status,conclusion:run.conclusion,branch:run.head_branch,sha:run.head_sha,
+  return {id:run.id,workflow:run.name,displayTitle:run.display_title||run.name,status:run.status,conclusion:run.conclusion,branch:run.head_branch,sha:run.head_sha,
    url:run.html_url,createdAt:run.created_at,updatedAt:run.updated_at,startedAt:run.run_started_at,
    jobs:(jobs.jobs||[]).map((job:any)=>({id:job.id,name:job.name,status:job.status,conclusion:job.conclusion,
     url:job.html_url,startedAt:job.started_at,completedAt:job.completed_at,
