@@ -44,7 +44,7 @@ function Index() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
-  const [releaseAutoRefresh,setReleaseAutoRefresh]=useState(true);
+  const [releaseAutoRefresh,setReleaseAutoRefresh]=useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [masterConnected, setMasterConnected] = useState(false);
@@ -153,89 +153,8 @@ function Index() {
     if (session) load(session, true);
   }, [channel]);
 
-  // Keep the existing persisted Base/Update attempts fresh while the operator
-  // works on other Control Centre pages. Reconcile immediately on browser return.
-  useEffect(() => {
-    if (!session?.token) return;
-    let stopped = false;
-    let inFlight = false;
-    const check = async () => {
-      if (stopped || inFlight || document.visibilityState !== "visible") return;
-      inFlight = true;
-      try { await load(session, true); } catch {}
-      finally { inFlight = false; }
-    };
-    const onReturn = () => { if (document.visibilityState === "visible") void check(); };
-    const timer = window.setInterval(() => void check(), 90000);
-    document.addEventListener("visibilitychange", onReturn);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onReturn);
-    };
-  }, [session?.token, channel]);
-
-
-  useEffect(() => {
-    if (!run?.id || !runRepo || !session) return;
-    const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
-    let stopped = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const poll = async () => {
-      try {
-        const r = await getReleaseRun({ data: { token: session.token, repo: runRepo, runId: run.id } });
-        if (stopped) return;
-        setRun((previous:any) => ({ ...previous, ...r.run, jobs: r.jobs || [], failure: r.failure || null }));
-        const conclusion=String(r.run?.conclusion || "");
-        if (["failure","cancelled"].includes(conclusion)) {
-          const detail=String(r.failure?.error || r.failure?.lines?.join("\n") || `Release workflow ${conclusion}.`).trim();
-          setError(detail);
-        }
-        if (["success", "failure", "cancelled", "skipped"].includes(conclusion)) {
-          if (timer) { clearInterval(timer); timer = null; }
-          await load(session, true);
-        }
-      } catch (x:any) {
-        if (!stopped) setError(x?.message || "Unable to read the release workflow state.");
-      }
-    };
-    // Even completed runs need one fetch after refresh to restore jobs and final logs.
-    void poll();
-    if (!completedAlready && releaseAutoRefresh && (tab==="base"||tab==="engine")) timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 20000);
-    return () => { stopped = true; if(timer)clearInterval(timer); };
-  }, [run?.id, runRepo, session?.token, releaseAutoRefresh, tab]);
-
-  useEffect(() => {
-    if (!run?.id || !runRepo || !session || !runVersion) return;
-    if (String(run.status||"")!=="completed" || String(run.conclusion||"").toLowerCase()!=="success") return;
-    let stopped = false;
-    let attempts = 0;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const poll = async () => {
-      try {
-        const baseWorkerRepo=String(data.base.repositories?.base?.workerRepo||"");
-        const engineWorkerRepo=String(data.engine.repositories?.engine?.repo||"");
-        const type: ReleaseType = runRepo===baseWorkerRepo?"base":runRepo===engineWorkerRepo?"engine":(()=>{throw new Error("Release run repository does not match the active GitHub profile.")})();
-        const r = await getReleaseHandoff({
-          data: { token: session.token, type, version: runVersion, channel: runChannel }
-        });
-        if (stopped) return;
-        attempts++;
-        if (r.release) {
-          setHandoff(r.release);
-          await load(session, true);
-          if (timer) { clearInterval(timer); timer = null; }
-        } else if (attempts>=20 && timer) {
-          clearInterval(timer); timer = null;
-        }
-      } catch (x:any) {
-        if (!stopped) setError(x?.message || "Unable to read the License Manager handoff state.");
-      }
-    };
-    timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
-    void poll();
-    return () => { stopped = true; if (timer) clearInterval(timer); };
-  }, [run?.id, run?.status, run?.conclusion, runRepo, session?.token, runVersion, runChannel]);
+  // GitHub status is fetched only when the operator presses Refresh or
+  // explicitly starts/resumes an action. No idle polling or on-return checks.
 
   const stats = useMemo(() => {
     const all = [...(data.base.releases || []), ...(data.engine.releases || [])];
@@ -896,7 +815,7 @@ function RepositoriesPage({data,session,onBase,onEngine}:any) {
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
   const loadRepos=async()=>{setLoading(true);setError("");try{const r=await getRepositoryStatus({data:{token:session.token}});setRows(r.repositories||[])}catch(x:any){setError(x.message||"Unable to load repository status.")}finally{setLoading(false)}};
-  useEffect(()=>{void loadRepos()},[session.token]);
+  // Repositories are refreshed on explicit request only.
   return <section className="space-y-4">
     <div className="flex flex-col justify-between gap-3 border-b pb-5 md:flex-row md:items-end"><PageHead title="Repositories" detail="Live source refs and the latest release-builder workflow for the two allowed release repositories."/><button className="button-secondary" onClick={loadRepos} disabled={loading}><RefreshCw size={14} className={loading?"animate-spin":""}/> Refresh</button></div>
     {error&&<Alert tone="error" onClose={()=>setError("")}>{error}</Alert>}
