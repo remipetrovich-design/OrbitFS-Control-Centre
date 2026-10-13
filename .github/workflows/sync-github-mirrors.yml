@@ -345,7 +345,8 @@ jobs:
                 exit 1
               fi
             else
-              echo "::notice::$key has no previous mirror marker. Inspect destination changes before syncing."
+              echo "::error::$key has no previous mirror marker. A baseline review is required before a destructive initial sync."
+              exit 1
             fi
             # Convert both temporary trees to the target repository identity.
             # The explicitly selected source direction is authoritative for this run.
