@@ -334,6 +334,148 @@ jobs:
             dst="target-$key"
             echo "::group::Prepare $key"
             git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
+            # Never overwrite work done independently on the destination since
+            # its last completed repository mirror. It must be reviewed first.
+            last_mirror="$(git -C "$dst" log -1 --format=%H --grep='^Sync main from mirror source
+
+            # Convert both temporary trees to the target repository identity.
+            # The explicitly selected source direction is authoritative for this run.
+            normalize_for_target "$src" "$key" true
+            normalize_for_target "$dst" "$key" false
+            echo "::notice::$key target content will be reconciled to the explicitly selected source direction."
+
+            excludes=(
+            --exclude=".git/" --exclude=".github/workflows/"
+            --exclude=".vercel/" --exclude=".env" --exclude=".env.*"
+            --exclude="*.pem" --exclude="*.key" --exclude="*.p12" --exclude="*.pfx"
+            --exclude="service-account.json" --exclude="credentials.json"
+            --exclude="vault*.json" --exclude="*vault*export*.json"
+            --exclude="supabase/.temp/" --exclude="supabase/.branches/"
+            --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
+            )
+            case "$key" in
+            control) excludes+=(--exclude="src/lib/github-profile.ts");;
+            license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
+            esac
+            rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
+            normalize_for_target "$dst" "$key" true
+
+            remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
+            test -z "$remaining" || { echo "::error::Mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
+
+            git -C "$dst" config user.name "OrbitFS Repository Sync"
+            git -C "$dst" config user.email "actions@users.noreply.github.com"
+            # Respect gitignore. Check staged files before every push.
+            git -C "$dst" add -A
+            while IFS= read -r file; do
+            case "$file" in
+            .env|.env.*|.vercel/*|*.pem|*.key|*.p12|*.pfx|*credentials.json|*service-account.json|*vault*export*.json|supabase/config.toml|.github/workflows/*)
+            echo "::error::Protected configuration staged: $file"
+            exit 1
+            ;;
+            esac
+            done < <(git -C "$dst" diff --cached --name-only)
+            if git -C "$dst" diff --cached --quiet; then
+              if git -C "$dst" log -1 --format='%s' | grep -qx 'Sync main from mirror source'; then
+                echo "current" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+                echo "$key already current and marker is present"
+              else
+                echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+                git -C "$dst" commit --allow-empty --quiet -m "Sync main from mirror source"
+                target_ref="main"
+                git -C "$dst" push --dry-run origin "HEAD:$target_ref"
+                echo "$key content is current; bootstrap marker prepared"
+              fi
+            else
+              echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
+              git -C "$dst" commit --quiet -m "Sync main from mirror source"
+              target_ref="main"
+              git -C "$dst" push --dry-run origin "HEAD:$target_ref"
+              echo "$key prepared and push permission verified"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Apply and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
+            direction="lucaskerim123 → remipetrovich-design"
+          else
+            direction="remipetrovich-design → lucaskerim123"
+          fi
+          {
+            echo "## Repository mirror sync"
+            echo ""
+            echo "**Direction:** $direction"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Re-check every target before the first push so a late edit cannot
+          # leave the five repositories half-synced.
+          for key in base engine license billing control; do
+            dst="target-$key"
+            expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
+            git -C "$dst" fetch --quiet origin main
+            remote_before="$(git -C "$dst" rev-parse origin/main)"
+            test "$remote_before" = "$expected" || { echo "::error::Remote main changed after preflight for $key; refusing to start a partial five-repo sync."; exit 1; }
+          done
+
+          for key in base engine license billing control; do
+            src="source-$key"
+            dst="target-$key"
+            target_ref="main"
+            state="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")"
+            if [ "$state" = "changed" ]; then
+              expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
+              git -C "$dst" fetch --quiet origin "$target_ref"
+              remote_before="$(git -C "$dst" rev-parse "origin/$target_ref")"
+              test "$remote_before" = "$expected" || { echo "::error::Remote $target_ref changed after preflight for $key; refusing to overwrite newer work."; exit 1; }
+              git -C "$dst" push origin "HEAD:$target_ref"
+              git -C "$dst" fetch --quiet origin "$target_ref"
+              test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse "origin/$target_ref")" || { echo "::error::Remote main verification failed for $key."; exit 1; }
+              test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for $key."; exit 1; }
+              excludes=(
+              --exclude=".git/" --exclude=".github/workflows/"
+              --exclude=".vercel/" --exclude=".env" --exclude=".env.*"
+              --exclude="*.pem" --exclude="*.key" --exclude="*.p12" --exclude="*.pfx"
+              --exclude="service-account.json" --exclude="credentials.json"
+              --exclude="vault*.json" --exclude="*vault*export*.json"
+              --exclude="supabase/.temp/" --exclude="supabase/.branches/"
+              --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
+              )
+              case "$key" in
+              control) excludes+=(--exclude="src/lib/github-profile.ts");;
+              license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
+              esac
+              remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
+              test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
+              echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              git -C "$dst" fetch --quiet origin "$target_ref"
+              test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for current $key."; exit 1; }
+              echo "- ✅ $key — already current and marker verified" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target main branches match portable source files. Destination-owned configuration and deployment workflows remain preserved." >> "$GITHUB_STEP_SUMMARY"
+ || true)"
+            if [ -n "$last_mirror" ]; then
+              pending="$(git -C "$dst" diff --name-only "$last_mirror" HEAD -- . \
+                ':(exclude).github/workflows/**' \
+                ':(exclude).env' ':(exclude).env.*' \
+                ':(exclude)src/lib/github-profile.ts' \
+                ':(exclude)database/migrations/20261004100000_license_manager_github_profile.sql' \
+                ':(exclude)supabase/config.toml')"
+              if [ -n "$pending" ]; then
+                echo "::error::$key has independent destination application changes since its last mirror; refusing to overwrite them."
+                printf '%s\n' "$pending"
+                exit 1
+              fi
+            else
+              echo "::notice::$key has no prior mirror marker; target changes cannot be dated against a sync baseline."
+            fi
 
             # Convert both temporary trees to the target repository identity.
             # The explicitly selected source direction is authoritative for this run.
