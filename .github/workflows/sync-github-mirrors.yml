@@ -336,8 +336,17 @@ jobs:
             git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
             # Never overwrite work done independently on the destination since
             # its last completed repository mirror. It must be reviewed first.
-            last_mirror="$(git -C "$dst" log -1 --format=%H --grep='^Sync main from mirror source
-
+            last_mirror="$(git -C "$dst" log -1 --format=%H --grep="Sync main from mirror source" || true)"
+            if [ -n "$last_mirror" ]; then
+              pending="$(git -C "$dst" diff --name-only "$last_mirror" HEAD -- . ':(exclude).github/workflows/**' ':(exclude).env' ':(exclude).env.*' ':(exclude)src/lib/github-profile.ts' ':(exclude)database/migrations/20261004100000_license_manager_github_profile.sql' ':(exclude)supabase/config.toml')"
+              if [ -n "$pending" ]; then
+                echo "::error::$key contains independent destination changes; sync cannot safely overwrite them."
+                printf "%s\\n" "$pending"
+                exit 1
+              fi
+            else
+              echo "::notice::$key has no previous mirror marker. Inspect destination changes before syncing."
+            fi
             # Convert both temporary trees to the target repository identity.
             # The explicitly selected source direction is authoritative for this run.
             normalize_for_target "$src" "$key" true
