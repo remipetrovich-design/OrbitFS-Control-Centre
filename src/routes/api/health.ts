@@ -28,7 +28,7 @@ export const Route=createFileRoute("/api/health")({
      }
     }catch{}
     try{
-     const base=String(process.env.LICENSE_MASTER_URL||"").trim();
+     const base="https://lm.incendiarynetworks.cc/api/v1";
      const api=new URL(base);
      if(api.protocol!=="https:"||(localGithubProfileName()==="fallback"&&api.hostname!=="lm.incendiarynetworks.cc")||api.pathname!=="/api/v1"||api.username||api.password||api.search||api.hash){
       throw new Error("License Manager API origin is not configured for this mode");
