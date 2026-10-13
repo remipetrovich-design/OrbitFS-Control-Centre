@@ -305,11 +305,11 @@ async function refreshLive(){
   }
  }catch{}
 }
-function startLive(){void refreshLive();if(liveTimer)clearInterval(liveTimer);liveTimer=setInterval(()=>void refreshLive(),60000)}
+function startLive(){/* Manual refresh only: no GitHub polling timer. */}
 function applyMode(){const mode=window.openai?.displayMode;document.body.classList.toggle("fullscreen",mode==="fullscreen");document.body.classList.toggle("pip",mode==="pip");if(mode==="pip"&&lastRun&&!liveTimer)startLive()}
 window.addEventListener("openai:set_globals",()=>{applyMode();if(window.openai?.toolOutput)render(window.openai.toolOutput)});
 if(!MCP_UI_POLICY.fullscreen)$("fullscreen").classList.add("hidden");
-applyMode();render(current);showPage(window.openai?.widgetState?.devPage||"overview");markChecked();if(!current?.checkedAt)setTimeout(()=>void refreshStatus(true),250);
+applyMode();render(current);showPage(window.openai?.widgetState?.devPage||"overview");markChecked();// A deliberate Refresh action is required to contact GitHub.
 </script>
 </body>
 </html>`;
