@@ -380,7 +380,6 @@ export function VaultWorkspace({session}:{session:any}){
       </div>
       <p className="text-xs text-muted-foreground">Syncing needs an unlocked Vault, valid account credentials, a selected repository or project, and explicit approval for each write. GitHub secret values cannot be compared remotely, so no automatic secret drift verdict is implied. Runtime services still use provider-side variables; they do not read directly from this browser-encrypted Vault.</p>
     </section>
-    <VaultVercelSyncAll session={session} records={records} onPersist={persist}/>
     <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-2" aria-label="Vault encrypted backup">
       <h2 className="text-sm font-semibold">Backup your current Vault</h2>
       <p className="text-xs text-muted-foreground">Download the latest saved encrypted entries before redesigning. Your saved keys are not changed.</p>
@@ -447,6 +446,7 @@ export function VaultWorkspace({session}:{session:any}){
         </div>
       </details>;
     })}
+    <VaultVercelSyncAll session={session} records={records} onPersist={persist}/>
     <details className="orbit-panel min-w-0 max-w-full p-4" open={Boolean(editing)} key={editing?.id||"new-entry"}>
       <summary className="cursor-pointer text-sm font-semibold">{editing?"Edit saved variable":"Add environment variable"}</summary>
       <p className="mt-2 text-xs text-muted-foreground">Use the existing encrypted editor. One secret can have multiple destinations in Main and Fallback.</p>
