@@ -31,7 +31,7 @@ export function AiRepairWorkspace({session}:{session:any}){
  const [live,setLive]=useState<any>(null);
  const [liveError,setLiveError]=useState("");
  const [liveBusy,setLiveBusy]=useState(false);
- const [liveAutoRefresh,setLiveAutoRefresh]=useState(true);
+ const [liveAutoRefresh,setLiveAutoRefresh]=useState(false);
  const [liveCheckedAt,setLiveCheckedAt]=useState("");
  const [repairTracking,setRepairTracking]=useState<{repo:string;runId:number;startedAt:string;workerUrl:string}|null>(null);
  const [repairProgress,setRepairProgress]=useState<any>(null);
@@ -47,7 +47,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   }catch(e:any){setError(e.message||"Failed to load AI Repair Centre")}
   finally{setBusy("")}
  },[token]);
- useEffect(()=>{void load();const interval=setInterval(()=>{if(document.visibilityState==="visible")void load()},60000);return ()=>clearInterval(interval)},[load]);
+ // AI Repair status is refreshed on explicit request only.
  const runs=useMemo(()=>overview?.groups?.flatMap((g:any)=>g.runs||[])||[],[overview]);
  const rows=useMemo(()=>{
   const combined=[...incidents.map((i:any)=>({...i,kind:i.kind||(i.repo?.toLowerCase().includes("engine")?"engine":"base"),origin:"stored"})),...runs.filter((r:any)=>policy?.show_github_failures!==false&&!incidents.some((i:any)=>i.repo===r.repo&&i.runId===r.id)&&!archivedRuns.some((i:any)=>i.repo===r.repo&&i.runId===r.id)).map((r:any)=>({...r,runId:r.id,origin:"github",status:"detected"}))];
@@ -143,13 +143,6 @@ export function AiRepairWorkspace({session}:{session:any}){
   catch(e:any){setLiveError(e?.message||"Unable to read worker jobs")}
   finally{liveInFlight.current=false;setLiveBusy(false)}
  },[token]);
- useEffect(()=>{
-  if(section!=="console")return;
-  void refreshLive();
-  if(!liveAutoRefresh)return;
-  const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refreshLive()},20000);
-  return()=>window.clearInterval(timer);
- },[section,liveAutoRefresh,refreshLive]);
  useEffect(()=>{
   if(!repairTracking)return;
   let cancelled=false;
