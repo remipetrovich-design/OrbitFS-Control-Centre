@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,ChevronRight,ExternalLink,FileCode2,Github,Loader2,Play,RefreshCw,Server,ShieldCheck,Terminal,XCircle,Zap} from "lucide-react";
-import {getOperationsState,getOperationsRunDetail,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
+import {getOperationsState,getOperationsRunDetail,getOperationsScan,runOperation} from "@/lib/panel.server";
 
 const SYSTEMS=[
  {key:"licenseManager",label:"Custom License Manager"},
@@ -24,7 +24,6 @@ export function OperationsWorkspace({session}:{session:any}){
  const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:false,billingStore:false});
  const [consoleBusy,setConsoleBusy]=useState<Record<string,boolean>>({});
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
- const [syncState,setSyncState]=useState<any>(null);
 
  const applyState=useCallback((r:any)=>{
   setData((current:any)=>{
@@ -57,10 +56,8 @@ export function OperationsWorkspace({session}:{session:any}){
   finally{if(!silent)setLoading(false)}
  },[session.token,applyState]);
 
- const loadSync=useCallback(async()=>{
-  try{const r=await getRepositorySyncState({data:{token:session.token}});setSyncState(r)}
-  catch(x:any){setError(x.message||"Unable to load repository sync state.")}
- },[session.token]);
+ // Load once on entry. Refresh remains explicit; no background GitHub polling.
+ useEffect(()=>{void load()},[load]);
 
  const refreshRepositoryChecks=useCallback(async(force=false)=>{
   const rows=await Promise.all(SYSTEMS.map(async system=>[system.key,await getOperationsScan({data:{token:session.token,system:system.key,force}})] as const));
@@ -80,14 +77,12 @@ export function OperationsWorkspace({session}:{session:any}){
   setLoading(true);setError("");
   try{
    const openConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]);
-   const [state,sync,consoleRows]=await Promise.all([
+   const [state,consoleRows]=await Promise.all([
     getOperationsState({data:{token:session.token,force:true}}),
-    getRepositorySyncState({data:{token:session.token}}),
     Promise.all(openConsoleKeys.map(async key=>[key,await getOperationsRunDetail({data:{token:session.token,system:key as any}})] as const)),
     refreshRepositoryChecks(true),
    ]);
    applyState(state);
-   setSyncState(sync);
    if(consoleRows.length)setData((current:any)=>({...current,systems:{...(current.systems||{}),...Object.fromEntries(consoleRows)}}));
   }catch(x:any){setError(x.message||"Unable to refresh Operations status.")}
   finally{setLoading(false)}
@@ -96,8 +91,6 @@ export function OperationsWorkspace({session}:{session:any}){
  // Manual-only GitHub status: initial rendering and background timers must not
  // consume either family's GitHub API quota. Use Refresh or an explicit action.
  const live=false;
- const operationsVerified=SYSTEMS.every(system=>Boolean(data.systems?.[system.key]?.repo&&data.systems?.[system.key]?.currentSha));
- const syncLive=false;
  const failedConsoleKey="";
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
@@ -112,19 +105,6 @@ export function OperationsWorkspace({session}:{session:any}){
    await load(true,true);
    await loadConsole(system,true);
   }catch(x:any){setError(x.message||"Unable to start workflow.")}
-  finally{setBusy("")}
- };
-
- const syncRepositories=async()=>{
-  if(!syncState)return;
-  const direction=syncState.sourceOwner+" → "+syncState.targetOwner;
-  if(!window.confirm("Sync all five main repositories "+direction+"? Target main branches will be made identical to the source, including file deletions."))return;
-  setBusy("repository-sync");setError("");setNotice("");
-  try{
-   const r=await runRepositorySync({data:{token:session.token}});
-   setNotice(r.message||"Repository sync queued.");
-   await loadSync();
-  }catch(x:any){setError(x.message||"Unable to start repository sync.")}
   finally{setBusy("")}
  };
 
@@ -158,29 +138,8 @@ export function OperationsWorkspace({session}:{session:any}){
    </div>
   </section>
 
-  <section className="release-surface overflow-hidden">
-   <div className="orbit-section-bar">
-    <div className="orbit-section-head"><span className="orbit-section-icon"><Github size={15}/></span><div><h2>Repository mirror sync</h2><p>Manual one-way sync of all five OrbitFS main repositories. Target-specific GitHub workflows are preserved while application files are mirrored.</p></div></div>
-    <Pill text={syncLive?"LIVE":syncState?.latestRun?.conclusion==="success"?"PASSED":syncState?.latestRun?.conclusion?String(syncState.latestRun.conclusion).toUpperCase():"IDLE"}/>
-   </div>
-   <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
-    <div className="min-w-0">
-     <p className="text-xs font-semibold">{syncState?syncState.sourceOwner+" → "+syncState.targetOwner:"Loading sync direction…"}</p>
-     <p className="mt-1 text-[10px] leading-5 text-muted-foreground">Syncs Base, Engine, License Manager, Billing Store and this control panel on <code>main</code>. Target workflow configuration is preserved and no extra branches are created.</p>
-     {syncState?.latestRun&&<p className="mt-1 text-[9px] text-muted-foreground">Last run #{syncState.latestRun.run_number} · {syncState.latestRun.status}{syncState.latestRun.conclusion?" · "+syncState.latestRun.conclusion:""}</p>}
-    </div>
-    <div className="flex flex-wrap items-center gap-2">
-     {syncState?.latestRun?.html_url&&<a className="button-secondary" href={syncState.latestRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last sync</a>}
-     <button className="button-primary" onClick={()=>void syncRepositories()} disabled={!syncState||!!busy||syncLive}>{busy==="repository-sync"?<Loader2 size={13} className="animate-spin"/>:<RefreshCw size={13}/>} {syncState?.buttonLabel||"Sync repositories"}</button>
-    </div>
-   </div>
-  </section>
-
-  {!operationsVerified&&<div className="rounded-lg border border-amber-400/30 px-3 py-3 text-xs text-amber-100">
-   GitHub repository and deployment history is unverified. No run or deployment state will be reported until the Fallback GitHub credential is working.
-  </div>}
   <div className="space-y-3">
-   {(operationsVerified?SYSTEMS:[]).map(system=>{
+   {SYSTEMS.map(system=>{
     const s=data.systems?.[system.key]||{};
     const run=s.run;
     const fullRun=s.ciRun;
