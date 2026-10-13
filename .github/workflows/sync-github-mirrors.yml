@@ -336,9 +336,7 @@ jobs:
             git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
             # Convert both temporary trees to the target repository identity.
             # The explicitly selected source direction is authoritative for this run.
-            normalize_for_target "$src" "$key" true
-            normalize_for_target "$dst" "$key" false
-            echo "::notice::$key target content will be reconciled to the explicitly selected source direction."
+            echo "::notice::$key source files will be mirrored without changing destination-owned mode identities."
 
             excludes=(
             --exclude=".git/" --exclude=".github/workflows/"
@@ -419,8 +417,6 @@ jobs:
               fi
             done <<< "$changed_files"
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
-            normalize_for_target "$dst" "$key" true
-
             remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
             test -z "$remaining" || { echo "::error::Mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
 
@@ -428,6 +424,8 @@ jobs:
             git -C "$dst" config user.email "actions@users.noreply.github.com"
             # Respect gitignore. Check staged files before every push.
             git -C "$dst" add -A
+            # No excluded identity, environment, or authority file may change.
+            git -C "$dst" diff --cached --name-only > "$RUNNER_TEMP/orbitfs-sync/$key.staged"
             while IFS= read -r file; do
             case "$file" in
             .env|.env.*|.vercel/*|*.pem|*.key|*.p12|*.pfx|*credentials.json|*service-account.json|*vault*export*.json|supabase/config.toml|.github/workflows/*)
@@ -687,10 +685,50 @@ jobs:
               --exclude="supabase/.temp/" --exclude="supabase/.branches/"
               --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
               )
-              case "$key" in
-              control) excludes+=(--exclude="src/lib/github-profile.ts");;
-              license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
-              esac
+            case "$key" in
+              base)
+                excludes+=(--exclude="src/lib/server/database-package-registry.ts")
+                excludes+=(--exclude="src/lib/server/license.ts")
+                excludes+=(--exclude="src/lib/server/update-checkpoints.ts")
+                excludes+=(--exclude="src/lib/server/vercel-engine-provision.ts")
+                excludes+=(--exclude="tools/build-database-package.mjs")
+                ;;
+              engine)
+                excludes+=(--exclude="release/update-baseline.json")
+                excludes+=(--exclude="tools/build-database-package.mjs")
+                ;;
+              license)
+                excludes+=(--exclude="app/api/v1/engine-bootstrap/route.ts")
+                excludes+=(--exclude="app/api/v1/license/validate/route.ts")
+                excludes+=(--exclude="app/api/v1/releases/route.ts")
+                excludes+=(--exclude="app/layout.tsx")
+                excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql")
+                excludes+=(--exclude="lib/core/database-packages.ts")
+                excludes+=(--exclude="lib/core/releases.ts")
+                excludes+=(--exclude="lib/core/source-activation.ts")
+                excludes+=(--exclude="middleware.ts")
+                excludes+=(--exclude="scripts/release-manifest.mjs")
+                excludes+=(--exclude="scripts/release-manifest.test.mjs")
+                ;;
+              billing)
+                excludes+=(--exclude="scripts/release-manifest.mjs")
+                excludes+=(--exclude="src/app/admin/settings/api-connections/page.tsx")
+                excludes+=(--exclude="src/app/admin/settings/deployment-providers/page.tsx")
+                excludes+=(--exclude="src/app/admin/settings/license-master/page.tsx")
+                excludes+=(--exclude="src/app/api/admin/settings/license-master/route.ts")
+                excludes+=(--exclude="src/lib/license-master-config.ts")
+                excludes+=(--exclude="src/lib/orbitfs-deployment.ts")
+                excludes+=(--exclude="src/proxy.ts")
+                ;;
+              control)
+                excludes+=(--exclude="src/lib/github-profile.ts")
+                excludes+=(--exclude="src/lib/panel.server.ts")
+                excludes+=(--exclude="src/routes/api/github-profile.ts")
+                excludes+=(--exclude="src/routes/api/health.ts")
+                excludes+=(--exclude="src/routes/index.tsx")
+                excludes+=(--exclude="src/start.ts")
+                ;;
+            esac
               remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
               test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
               echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
