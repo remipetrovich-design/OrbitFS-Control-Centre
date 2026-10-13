@@ -794,12 +794,12 @@ function ReleasesPage({releases,session,onChanged,onBase,onEngine}:any) {
 function MonitoringPage({releases,run,connected,session}:any) {
   const series=releaseSeries(releases);
   const [repos,setRepos]=useState<any[]>([]);
-  const [loading,setLoading]=useState(true);
-  useEffect(()=>{let live=true;(async()=>{try{const r=await getRepositoryStatus({data:{token:session.token}});if(live)setRepos(r.repositories||[])}catch{}finally{if(live)setLoading(false)}})();return()=>{live=false}},[session.token,run?.id,run?.status,run?.conclusion]);
+  const [loading,setLoading]=useState(false);
+  const refreshWorkers=async()=>{setLoading(true);try{const r=await getRepositoryStatus({data:{token:session.token}});setRepos(r.repositories||[])}finally{setLoading(false)}};
   const failed=releases.filter((r:any)=>r.manifest?.validation?.status==="failed").length;
   const pending=releases.filter((r:any)=>r.review_status==="pending").length;
   return <section className="space-y-4">
-    <PageHead title="Release Monitoring" detail="Live workflow state, repository workers, License Master validation, and recent release activity."/>
+    <div className="flex items-center justify-between gap-2"><PageHead title="Release Monitoring" detail="Release history and manually refreshed GitHub worker status."/><button className="button-secondary" onClick={()=>void refreshWorkers()} disabled={loading&&repos.length>0}><RefreshCw size={14}/>Refresh GitHub</button></div>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Master API" value={connected?"Online":"Offline"} detail="License Master connection"/><Metric label="Validation failures" value={failed} detail="Visible failed validations"/><Metric label="Pending review" value={pending} detail="Candidates awaiting technical review"/><Metric label="Active workflow" value={run&&!run.conclusion?"1":"0"} detail={run?.id?"Run #"+run.id:"No active monitored run"}/></div>
     <div className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
       <section className="release-surface p-4"><SectionHead icon={Activity} title="7-day release activity" detail="Release records created per day."/><MiniLineChart data={series}/></section>
