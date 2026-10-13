@@ -410,6 +410,10 @@ jobs:
               for argument in "${excludes[@]}"; do
                 if [ "$argument" = "--exclude=$changed" ]; then protected=true; break; fi
               done
+              # Independently committed but byte-identical portable files are safe.
+              if [ "$protected" != true ] && [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] && cmp -s "$src/$changed" "$dst/$changed"; then
+                continue
+              fi
               if [ "$protected" != true ]; then
                 echo "::error::$key has newer independent source changes: $changed"
                 echo "::error::Review differences before a destructive mirror."
