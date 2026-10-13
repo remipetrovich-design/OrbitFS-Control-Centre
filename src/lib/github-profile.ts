@@ -42,10 +42,7 @@ let profileCache:{name:GithubProfileName;expires:number}|null=null;
 
 async function storedProfileName():Promise<GithubProfileName>{
  if(profileCache&&profileCache.expires>Date.now())return profileCache.name;
- const sources=[
-  'https://incendiarynetworks.cc/api/v1/source-configuration',
-  'https://lm.incendiarynetworks.cc/api/v1/source-configuration',
- ] as const;
+ const sources=['https://lm.incendiarynetworks.cc/api/v1/source-configuration'] as const;
  const confirmed:GithubProfileName[]=[];
  for(const endpoint of sources){
   try{
