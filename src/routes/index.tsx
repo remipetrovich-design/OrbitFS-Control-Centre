@@ -1015,24 +1015,24 @@ function ApiConnectionsPage({session}:any){
  const loadApiConnections=async()=>{setBusy("load");setPageError("");try{const next=await getApiConnectionState({data:{token:session.token}});setState(next);setUrl(next.selectedUrl||"")}catch(x:any){setPageError(x.message||"Unable to load API connections.")}finally{setBusy("")}};
  useEffect(()=>{void loadApiConnections()},[session?.token]);
  const official=Array.isArray(state?.officialConnections)?state.officialConnections:[];
- const selected=official.find((row:any)=>String(row.base_url)===url);
- const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url}});setUrl(result.selectedUrl);setMessage("Fallback License Manager API confirmed.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
- const test=async()=>{setBusy("test");setMessage("");setPageError("");try{const result=await testApiConnection({data:{token:session.token,url}});setMessage("Connected · "+result.latencyMs+"ms")}catch(x:any){setPageError(x.message||"API connection test failed.")}finally{setBusy("")}};
+ const options=Array.isArray(state?.apiOptions)?state.apiOptions:[];
+ const selected=options.find((row:any)=>String(row.url)===url);
+ const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url}});setUrl(result.selectedUrl);setMessage("Configured License Manager API confirmed.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
+ const test=async()=>{setBusy("test");setMessage("");setPageError("");try{const result=await testApiConnection({data:{token:session.token,url}});setMessage(result.message||("Connected · "+result.latencyMs+"ms"))}catch(x:any){setPageError(x.message||"API connection test failed.")}finally{setBusy("")}};
  return <section className="space-y-4">
-  <PageHead title="API Connections" detail="The Fallback API is pinned to its own License Manager; source switching is controlled by License Manager."/>
+  <PageHead title="API Connections" detail="Choose Main or Fallback API for a connection check. Production operations remain bound to this panel's own mode."/>
   {pageError&&<Alert tone="error" onClose={()=>setPageError("")}>{pageError}</Alert>}
   {message&&<Alert tone="success" onClose={()=>setMessage("")}>{message}</Alert>}
   <section className="orbit-panel p-4">
    <SectionHead icon={ShieldCheck} title="License Manager API" detail="Technical licensing, release and deployment authority. Dev Panel remains an operations frontend only."/>
    <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
     <div>
-     <Field label="Official API URL"><input className="control mt-1" list="dev-official-master-apis" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://lm.incendiarynetworks.cc/api/v1"/></Field>
-     <datalist id="dev-official-master-apis">{official.map((row:any)=><option key={row.base_url} value={row.base_url}>{row.label}</option>)}</datalist>
-     <p className="mt-2 text-[10px] leading-5 text-muted-foreground">The Fallback API URL is managed in Vercel and only confirms when it matches an enabled <code>dev_panel</code> endpoint from License Manager's official registry.</p>
-     <div className="mt-3 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url} onClick={()=>void save()}>{busy==="save"?"Saving…":"Save official API"}</button><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test()}>{busy==="test"?"Testing…":"Test connection"}</button><button className="button-secondary" disabled={!official.length||Boolean(busy)} onClick={()=>setUrl(String(official[0]?.base_url||""))}>Use recommended</button></div>
+     <Field label="License Manager API"><select className="control mt-1" value={url} onChange={e=>setUrl(e.target.value)}>{options.map((row:any)=><option key={row.id} value={row.url}>{row.label} — {row.url}</option>)}</select></Field>
+     <p className="mt-2 text-[10px] leading-5 text-muted-foreground">The selected API is for testing only. Production operations use this panel's configured authority; selecting the other mode never switches repositories or credentials.</p>
+     <div className="mt-3 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url||url!==state?.selectedUrl} onClick={()=>void save()}>{busy==="save"?"Checking…":"Confirm Main API"}</button><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test()}>{busy==="test"?"Testing…":"Test connection"}</button><button className="button-secondary" disabled={!state?.selectedUrl||Boolean(busy)} onClick={()=>setUrl(String(state?.selectedUrl||""))}>Use configured API</button></div>
     </div>
     <div className="orbit-kv-list">
-     <div><span>Status</span><code>{selected?"Official":"Not approved"}</code></div>
+     <div><span>Status</span><code>{selected?(selected.id==="main"?"Configured authority":"Other API · read-only"):"Unavailable"}</code></div>
      <div><span>Bootstrap</span><code>{state?.bootstrapUrl||"—"}</code></div>
      <div><span>Registry entries</span><code>{official.length}</code></div>
      <div><span>Selected</span><code>{state?.selectedUrl||"—"}</code></div>
