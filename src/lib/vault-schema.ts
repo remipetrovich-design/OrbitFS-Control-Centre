@@ -130,6 +130,7 @@ export function recordIdentity(row:VaultRecord):string {
 }
 export function allowedForVercelProject(row:VaultRecord,projectName:string,account:VaultMode):boolean {
  if(serviceOf(row)!=="Vercel")return false;
+ if(!row.usedIn?.includes(account))return false;
  if(!vaultDestinations(row).some(target=>target.toLowerCase()===projectName.toLowerCase()))return false;
  // A manually assigned, exact destination is authoritative even when the name
  // is absent from the static Main inventory (e.g. new Fallback-only variables).
@@ -139,5 +140,5 @@ export function allowedForVercelProject(row:VaultRecord,projectName:string,accou
  return vaultDestinations(row).length>0 && !row.needsReview;
 }
 export function allowedForGithubRepo(row:VaultRecord,repo:string,account:VaultMode):boolean {
- return serviceOf(row)==="GitHub"&&vaultDestinations(row).some(target=>target.toLowerCase()===repo.toLowerCase())&&!row.needsReview;
+ return serviceOf(row)==="GitHub"&&row.usedIn?.includes(account)===true&&vaultDestinations(row).some(target=>target.toLowerCase()===repo.toLowerCase())&&!row.needsReview;
 }
