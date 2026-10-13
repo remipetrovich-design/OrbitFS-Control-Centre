@@ -28,18 +28,16 @@ const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`
 // TanStack Start may evaluate imported server function modules in the browser,
 // where process.env.LICENSE_MASTER_URL is intentionally unavailable.
 function trustedMasterBootstrapUrl():string{
- const value=normalizeOfficialMasterUrl(required("LICENSE_MASTER_URL"));
- if(!value)throw new Error(localGithubProfileName()==="fallback"
-  ?"Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1"
-  :"Main LICENSE_MASTER_URL must be a valid HTTPS License Manager /api/v1 endpoint");
- return value;
+ // Each deployed panel is pinned to its own technical authority.
+ // The other API may be tested but cannot become the runtime bootstrap.
+ return "https://lm.incendiarynetworks.cc/api/v1";
 }
 function normalizeOfficialMasterUrl(value:string){
  try{
   const u=new URL(String(value||"").trim());
   const host=u.hostname.toLowerCase(),path=u.pathname.replace(/\/+$/,"");
   if(u.protocol!=="https:"||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
-  if(localGithubProfileName()==="fallback"&&host!=="lm.incendiarynetworks.cc")return null;
+  if(host!=="lm.incendiarynetworks.cc"&&host!=="incendiarynetworks.cc")return null;
   return u.origin+"/api/v1";
  }catch{return null}
 }
@@ -54,7 +52,7 @@ async function officialMasterConnections(force=false){
   if(response.ok){
    const body=await response.json().catch(()=>({}));
    connections=(Array.isArray(body?.connections)?body.connections:[])
-    .filter((row:any)=>row?.enabled!==false&&normalizeOfficialMasterUrl(String(row?.base_url||"")))
+    .filter((row:any)=>row?.enabled!==false&&normalizeOfficialMasterUrl(String(row?.base_url||""))===trustedMasterBootstrapUrl())
     .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
   }
  }catch{}
