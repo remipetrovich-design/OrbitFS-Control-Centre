@@ -30,7 +30,7 @@ const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`
 function trustedMasterBootstrapUrl():string{
  // Each deployed panel is pinned to its own technical authority.
  // The other API may be tested but cannot become the runtime bootstrap.
- return "https://lm.incendiarynetworks.cc/api/v1";
+ return localGithubProfileName()==="fallback"?"https://lm.incendiarynetworks.cc/api/v1":"https://incendiarynetworks.cc/api/v1";
 }
 function normalizeOfficialMasterUrl(value:string){
  try{
