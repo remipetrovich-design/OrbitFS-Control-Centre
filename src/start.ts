@@ -27,10 +27,7 @@ const csrfMiddleware = createCsrfMiddleware({
 
 
 const FAMILY = 'fallback';
-const AUTHORITIES = [
-  'https://incendiarynetworks.cc/api/v1/source-configuration',
-  'https://lm.incendiarynetworks.cc/api/v1/source-configuration',
-] as const;
+const AUTHORITIES = ['https://lm.incendiarynetworks.cc/api/v1/source-configuration'] as const;
 // A minimal readiness endpoint stays online without serving standby UI.
 const sourceModeGuard = createMiddleware().server(async ({ next, request }) => {
   const path = new URL(request.url).pathname;
