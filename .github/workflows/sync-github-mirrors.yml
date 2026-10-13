@@ -341,7 +341,19 @@ jobs:
             normalize_for_target "$dst" "$key" false
             echo "::notice::$key target content will be reconciled to the explicitly selected source direction."
 
-            excludes=(--exclude=".git/" --exclude=".github/workflows/")
+            excludes=(
+  --exclude=".git/" --exclude=".github/workflows/"
+  --exclude=".vercel/" --exclude=".env" --exclude=".env.*"
+  --exclude="*.pem" --exclude="*.key" --exclude="*.p12" --exclude="*.pfx"
+  --exclude="service-account.json" --exclude="credentials.json"
+  --exclude="vault*.json" --exclude="*vault*export*.json"
+  --exclude="supabase/.temp/" --exclude="supabase/.branches/"
+  --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
+)
+case "$key" in
+  control) excludes+=(--exclude="src/lib/github-profile.ts");;
+  license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
+esac
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
             normalize_for_target "$dst" "$key" true
 
@@ -350,7 +362,16 @@ jobs:
 
             git -C "$dst" config user.name "OrbitFS Repository Sync"
             git -C "$dst" config user.email "actions@users.noreply.github.com"
-            git -C "$dst" add -A -f
+            # Respect gitignore. Check staged files before every push.
+git -C "$dst" add -A
+while IFS= read -r file; do
+  case "$file" in
+    .env|.env.*|.vercel/*|*.pem|*.key|*.p12|*.pfx|*credentials.json|*service-account.json|*vault*export*.json|supabase/config.toml|.github/workflows/*)
+      echo "::error::Protected configuration staged: $file"
+      exit 1
+      ;;
+  esac
+done < <(git -C "$dst" diff --cached --name-only)
             if git -C "$dst" diff --cached --quiet; then
               if git -C "$dst" log -1 --format='%s' | grep -qx 'Sync main from mirror source'; then
                 echo "current" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
@@ -412,7 +433,19 @@ jobs:
               git -C "$dst" fetch --quiet origin "$target_ref"
               test "$(git -C "$dst" rev-parse HEAD)" = "$(git -C "$dst" rev-parse "origin/$target_ref")" || { echo "::error::Remote main verification failed for $key."; exit 1; }
               test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for $key."; exit 1; }
-              excludes=(--exclude=".git/" --exclude=".github/workflows/")
+              excludes=(
+  --exclude=".git/" --exclude=".github/workflows/"
+  --exclude=".vercel/" --exclude=".env" --exclude=".env.*"
+  --exclude="*.pem" --exclude="*.key" --exclude="*.p12" --exclude="*.pfx"
+  --exclude="service-account.json" --exclude="credentials.json"
+  --exclude="vault*.json" --exclude="*vault*export*.json"
+  --exclude="supabase/.temp/" --exclude="supabase/.branches/"
+  --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
+)
+case "$key" in
+  control) excludes+=(--exclude="src/lib/github-profile.ts");;
+  license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
+esac
               remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
               test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
               echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
@@ -423,4 +456,4 @@ jobs:
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved." >> "$GITHUB_STEP_SUMMARY"
+          echo "All five target main branches match portable source files. Destination-owned configuration and deployment workflows remain preserved." >> "$GITHUB_STEP_SUMMARY"
