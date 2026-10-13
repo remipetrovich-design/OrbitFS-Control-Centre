@@ -334,20 +334,6 @@ jobs:
             dst="target-$key"
             echo "::group::Prepare $key"
             git -C "$dst" rev-parse HEAD > "$RUNNER_TEMP/orbitfs-sync/$key.expected"
-            # Never overwrite work done independently on the destination since
-            # its last completed repository mirror. It must be reviewed first.
-            last_mirror="$(git -C "$dst" log -1 --format=%H --grep="Sync main from mirror source" || true)"
-            if [ -n "$last_mirror" ]; then
-              pending="$(git -C "$dst" diff --name-only "$last_mirror" HEAD -- . ':(exclude).github/workflows/**' ':(exclude).env' ':(exclude).env.*' ':(exclude)src/lib/github-profile.ts' ':(exclude)database/migrations/20261004100000_license_manager_github_profile.sql' ':(exclude)supabase/config.toml')"
-              if [ -n "$pending" ]; then
-                echo "::error::$key contains independent destination changes; sync cannot safely overwrite them."
-                printf "%s\\n" "$pending"
-                exit 1
-              fi
-            else
-              echo "::error::$key has no previous mirror marker. A baseline review is required before a destructive initial sync."
-              exit 1
-            fi
             # Convert both temporary trees to the target repository identity.
             # The explicitly selected source direction is authoritative for this run.
             normalize_for_target "$src" "$key" true
@@ -363,10 +349,75 @@ jobs:
             --exclude="supabase/.temp/" --exclude="supabase/.branches/"
             --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
             )
+            # Mode-owned source paths have deliberately different authorities,
+            # release identities or routing. Never mirror the whole file.
             case "$key" in
-            control) excludes+=(--exclude="src/lib/github-profile.ts");;
-            license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
+              base)
+                excludes+=(--exclude="src/lib/server/database-package-registry.ts")
+                excludes+=(--exclude="src/lib/server/license.ts")
+                excludes+=(--exclude="src/lib/server/update-checkpoints.ts")
+                excludes+=(--exclude="src/lib/server/vercel-engine-provision.ts")
+                excludes+=(--exclude="tools/build-database-package.mjs")
+                ;;
+              engine)
+                excludes+=(--exclude="release/update-baseline.json")
+                excludes+=(--exclude="tools/build-database-package.mjs")
+                ;;
+              license)
+                excludes+=(--exclude="app/api/v1/engine-bootstrap/route.ts")
+                excludes+=(--exclude="app/api/v1/license/validate/route.ts")
+                excludes+=(--exclude="app/api/v1/releases/route.ts")
+                excludes+=(--exclude="app/layout.tsx")
+                excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql")
+                excludes+=(--exclude="lib/core/database-packages.ts")
+                excludes+=(--exclude="lib/core/releases.ts")
+                excludes+=(--exclude="lib/core/source-activation.ts")
+                excludes+=(--exclude="middleware.ts")
+                excludes+=(--exclude="scripts/release-manifest.mjs")
+                excludes+=(--exclude="scripts/release-manifest.test.mjs")
+                ;;
+              billing)
+                excludes+=(--exclude="scripts/release-manifest.mjs")
+                excludes+=(--exclude="src/app/admin/settings/api-connections/page.tsx")
+                excludes+=(--exclude="src/app/admin/settings/deployment-providers/page.tsx")
+                excludes+=(--exclude="src/app/admin/settings/license-master/page.tsx")
+                excludes+=(--exclude="src/app/api/admin/settings/license-master/route.ts")
+                excludes+=(--exclude="src/lib/license-master-config.ts")
+                excludes+=(--exclude="src/lib/orbitfs-deployment.ts")
+                excludes+=(--exclude="src/proxy.ts")
+                ;;
+              control)
+                excludes+=(--exclude="src/lib/github-profile.ts")
+                excludes+=(--exclude="src/lib/panel.server.ts")
+                excludes+=(--exclude="src/routes/api/github-profile.ts")
+                excludes+=(--exclude="src/routes/api/health.ts")
+                excludes+=(--exclude="src/routes/index.tsx")
+                excludes+=(--exclude="src/start.ts")
+                ;;
             esac
+            # Preflight independent destination changes in portable paths.
+            # Protected files and workflow changes are excluded from this test.
+            last_mirror="$(git -C "$dst" log -1 --format=%H --grep="Sync main from mirror source" || true)"
+            if [ -z "$last_mirror" ]; then
+              echo "::error::$key has no trusted mirror baseline; refusing to overwrite its main branch."
+              exit 1
+            fi
+            changed_files="$(git -C "$dst" diff --name-only "$last_mirror" HEAD)"
+            while IFS= read -r changed; do
+              [ -n "$changed" ] || continue
+              case "$changed" in
+                .github/workflows/*|.env|.env.*|.vercel/*|supabase/config.toml) continue ;;
+              esac
+              protected=false
+              for argument in "${excludes[@]}"; do
+                if [ "$argument" = "--exclude=$changed" ]; then protected=true; break; fi
+              done
+              if [ "$protected" != true ]; then
+                echo "::error::$key has newer independent source changes: $changed"
+                echo "::error::Review differences before a destructive mirror."
+                exit 1
+              fi
+            done <<< "$changed_files"
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
             normalize_for_target "$dst" "$key" true
 
@@ -502,9 +553,51 @@ jobs:
             --exclude="supabase/.temp/" --exclude="supabase/.branches/"
             --exclude="supabase/.profiles/" --exclude="supabase/config.toml"
             )
+            # Mode-owned source paths have deliberately different authorities,
+            # release identities or routing. Never mirror the whole file.
             case "$key" in
-            control) excludes+=(--exclude="src/lib/github-profile.ts");;
-            license) excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql");;
+              base)
+                excludes+=(--exclude="src/lib/server/database-package-registry.ts")
+                excludes+=(--exclude="src/lib/server/license.ts")
+                excludes+=(--exclude="src/lib/server/update-checkpoints.ts")
+                excludes+=(--exclude="src/lib/server/vercel-engine-provision.ts")
+                excludes+=(--exclude="tools/build-database-package.mjs")
+                ;;
+              engine)
+                excludes+=(--exclude="release/update-baseline.json")
+                excludes+=(--exclude="tools/build-database-package.mjs")
+                ;;
+              license)
+                excludes+=(--exclude="app/api/v1/engine-bootstrap/route.ts")
+                excludes+=(--exclude="app/api/v1/license/validate/route.ts")
+                excludes+=(--exclude="app/api/v1/releases/route.ts")
+                excludes+=(--exclude="app/layout.tsx")
+                excludes+=(--exclude="database/migrations/20261004100000_license_manager_github_profile.sql")
+                excludes+=(--exclude="lib/core/database-packages.ts")
+                excludes+=(--exclude="lib/core/releases.ts")
+                excludes+=(--exclude="lib/core/source-activation.ts")
+                excludes+=(--exclude="middleware.ts")
+                excludes+=(--exclude="scripts/release-manifest.mjs")
+                excludes+=(--exclude="scripts/release-manifest.test.mjs")
+                ;;
+              billing)
+                excludes+=(--exclude="scripts/release-manifest.mjs")
+                excludes+=(--exclude="src/app/admin/settings/api-connections/page.tsx")
+                excludes+=(--exclude="src/app/admin/settings/deployment-providers/page.tsx")
+                excludes+=(--exclude="src/app/admin/settings/license-master/page.tsx")
+                excludes+=(--exclude="src/app/api/admin/settings/license-master/route.ts")
+                excludes+=(--exclude="src/lib/license-master-config.ts")
+                excludes+=(--exclude="src/lib/orbitfs-deployment.ts")
+                excludes+=(--exclude="src/proxy.ts")
+                ;;
+              control)
+                excludes+=(--exclude="src/lib/github-profile.ts")
+                excludes+=(--exclude="src/lib/panel.server.ts")
+                excludes+=(--exclude="src/routes/api/github-profile.ts")
+                excludes+=(--exclude="src/routes/api/health.ts")
+                excludes+=(--exclude="src/routes/index.tsx")
+                excludes+=(--exclude="src/start.ts")
+                ;;
             esac
             rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
             normalize_for_target "$dst" "$key" true
