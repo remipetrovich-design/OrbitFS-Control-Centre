@@ -93,29 +93,12 @@ export function OperationsWorkspace({session}:{session:any}){
   finally{setLoading(false)}
  };
 
- useEffect(()=>{void load()},[load]);
- useEffect(()=>{void loadSync()},[loadSync]);
- useEffect(()=>{
-  void refreshRepositoryChecks(false).catch(()=>undefined);
-  const t=setInterval(()=>{if(document.visibilityState==="visible")void refreshRepositoryChecks(false).catch(()=>undefined)},25*60*1000);
-  return()=>clearInterval(t);
- },[refreshRepositoryChecks]);
- const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
- useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
- const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
+ // Manual-only GitHub status: initial rendering and background timers must not
+ // consume either family's GitHub API quota. Use Refresh or an explicit action.
+ const live=false;
  const operationsVerified=SYSTEMS.every(system=>Boolean(data.systems?.[system.key]?.repo&&data.systems?.[system.key]?.currentSha));
- useEffect(()=>{if(!live)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void load(true)},60000);return()=>clearInterval(t)},[live,load]);
- const liveConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status&&data.systems[key].run.status!=="completed");
- const liveConsoleSignature=liveConsoleKeys.join("|");
- useEffect(()=>{
-  if(!liveConsoleSignature)return;
-  const refresh=()=>{if(document.visibilityState==="visible")for(const key of liveConsoleSignature.split("|").filter(Boolean))void loadConsole(key,true)};
-  void refresh();
-  const t=setInterval(refresh,30000);
-  return()=>clearInterval(t);
- },[liveConsoleSignature,loadConsole]);
- const failedConsoleKey=SYSTEMS.map(s=>s.key).find(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status==="completed"&&data.systems[key].run.conclusion==="failure"&&!data.systems[key].detailsLoaded)||"";
- useEffect(()=>{if(failedConsoleKey)void loadConsole(failedConsoleKey)},[failedConsoleKey,loadConsole]);
+ const syncLive=false;
+ const failedConsoleKey="";
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
