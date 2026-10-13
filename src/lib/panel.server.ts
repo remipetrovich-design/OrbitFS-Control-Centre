@@ -1605,13 +1605,22 @@ export const getRepositoryStatus=createServerFn({method:"POST"}).handler(async({
  ];
  const rows:any[]=[];
  for(const cfg of configs){
-  let head:any=null,run:any=null;
+  let head:any=null,run:any=null,preparation:any=null,failedStep:string|null=null;
   try{const branch=await github(`/repos/${cfg.repo}/git/ref/heads/${encodeURIComponent(cfg.ref)}`);head=branch?.object?.sha||null;}catch{}
   try{
    const runs=await github(`/repos/${cfg.repo}/actions/workflows/${encodeURIComponent(cfg.workflow)}/runs?branch=${encodeURIComponent(cfg.ref)}&per_page=1`);
    run=(runs?.workflow_runs||[])[0]||null;
   }catch{}
-  rows.push({...cfg,head,run});
+  try{
+   const result=await github('/repos/'+cfg.repo+'/actions/workflows/sync-release-branch.yml/runs?branch=main&per_page=1');
+   preparation=(result?.workflow_runs||[])[0]||null;
+   if(preparation?.conclusion==='failure'){
+    const resultJobs=await github('/repos/'+cfg.repo+'/actions/runs/'+preparation.id+'/jobs?per_page=100');
+    const failed=(resultJobs?.jobs||[]).find((job:any)=>job.conclusion==='failure');
+    failedStep=(failed?.steps||[]).find((step:any)=>step.conclusion==='failure')?.name||failed?.name||'Unknown failing step';
+   }
+  }catch(error){console.error('Unable to retrieve release branch preparation status for '+cfg.repo,error);}
+  rows.push({...cfg,head,run,preparation,failedStep});
  }
  return {repositories:rows};
 });
