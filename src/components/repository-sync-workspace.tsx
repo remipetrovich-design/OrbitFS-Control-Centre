@@ -17,7 +17,7 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
   try{const result=await getRepositorySyncState({data:{token:session.token}});setState(result);setError("");}
   catch(e:any){setError(e?.message||"Unable to retrieve the live GitHub sync state.");}
  },[session.token]);
- useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),8000);return()=>window.clearInterval(timer)},[load]);
+ // Sync status is requested only via Refresh or after the user starts a sync.
  const direction=state?.side==="fallback"?"fallback-to-main":"main-to-fallback";
  const running=Boolean(state?.active)||activeStatuses.has(String(state?.activeRun?.status||""));
  const latest=state?.activeRun||state?.latestRun;
