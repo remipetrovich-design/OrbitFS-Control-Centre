@@ -43,24 +43,8 @@ export function ReleaseWorkspace(p:any){
    (draft.attempts||[]).some((attempt:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(attempt?.status||"").toLowerCase())))||
   branchSync?.active
  );
- useEffect(()=>{
-  if(p.autoRefreshRuns===false||!runningBuild)return;
-  let stopped=false,inFlight=false;
-  const tick=async()=>{
-   if(stopped||inFlight||document.visibilityState!=="visible")return;
-   inFlight=true;
-   try{await p.onChanged?.();if(!stopped)setLastAutoRefresh(new Date().toLocaleTimeString())}
-   catch{}finally{inFlight=false}
-  };
-  const timer=window.setInterval(()=>void tick(),20000);
-  document.addEventListener("visibilitychange",tick);
-  return()=>{stopped=true;window.clearInterval(timer);document.removeEventListener("visibilitychange",tick)};
- },[p.autoRefreshRuns,runningBuild,p.session.token,p.type]);
- const autoRefreshControl=<label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-  <input type="checkbox" checked={p.autoRefreshRuns!==false} onChange={e=>p.setAutoRefreshRuns?.(e.target.checked)}/>
-  Auto refresh {runningBuild?"· every 20s while running":"· waiting for a job"}
-  {lastAutoRefresh&&<span className="text-muted-foreground">Updated {lastAutoRefresh}</span>}
- </label>;
+ // Release polling is manual to conserve the active account's GitHub API quota.
+ const autoRefreshControl=<button type="button" className="button-secondary" onClick={()=>void p.onChanged?.()}><RefreshCw size={13}/>Refresh release status</button>;
  useEffect(()=>{
   let cancelled=false;
   let timer:number|undefined;
@@ -77,14 +61,14 @@ export function ReleaseWorkspace(p:any){
     const next:any=await getReleaseBranchSyncState({data:{token:p.session.token,type:p.type,channel:p.channel}});
     if(cancelled)return;
     setBranchSync(next);
-    schedule(next?.active?60000:25*60*1000);
+    // No recurring status queries; explicit Refresh only.
    }catch{
     if(cancelled)return;
     setBranchSync((current:any)=>({...current,error:true}));
-    schedule(25*60*1000);
+    // No recurring status queries; explicit Refresh only.
    }
   };
-  void refresh();
+  if(sourceCheckNonce>0)void refresh();
   return()=>{cancelled=true;if(timer)window.clearTimeout(timer)};
  },[p.session.token,p.type,p.channel,sourceCheckNonce]);
  useEffect(()=>{
@@ -118,8 +102,7 @@ export function ReleaseWorkspace(p:any){
    }catch(x:any){if(!cancelled)setError(x?.message||"Unable to refresh promotion status.");}
   };
   void poll();
-  const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void poll()},60000);
-  return()=>{cancelled=true;window.clearInterval(timer)};
+  return()=>{cancelled=true};
  },[promotionRun?.runId,promotionRun?.sourceSha,promotionRun?.completed,promotionRun?.conclusion,base,p.session.token,p.type,p.channel,branchSync?.releaseRef,p.baseline?.ref]);
  // A historical run must not hijack a new wizard or an unrelated draft.
  // New builds use the version/channel of the run that this page actually started.
