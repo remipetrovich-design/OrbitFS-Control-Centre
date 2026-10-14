@@ -8,7 +8,7 @@ function source(kind:"base"|"engine",profile:"primary"|"fallback"){
  return kind==="base"?def.base.repo:def.engine.repo;
 }
 function token(profile:"primary"|"fallback"){
- const name=profile==="primary"?"ORBITFS_RELEASE_DISPATCH_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN";
+ const name=profile==="primary"?(process.env.MAIN_GITHUB_RELEASE_TOKEN?"MAIN_GITHUB_RELEASE_TOKEN":process.env.MAIN_GITHUB_TOKEN?"MAIN_GITHUB_TOKEN":"ORBITFS_RELEASE_DISPATCH_TOKEN"):(process.env.FALLBACK_GITHUB_RELEASE_TOKEN?"FALLBACK_GITHUB_RELEASE_TOKEN":process.env.FALLBACK_GITHUB_TOKEN?"FALLBACK_GITHUB_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
  const value=process.env[name]||"";
  if(!value)throw Error("GitHub read access for "+profile+" is not configured");
  return value;
@@ -65,7 +65,7 @@ export const getAiRepairLiveActions=createServerFn({method:"POST"}).handler(asyn
  // The scheduled diagnosis worker currently belongs to the Fallback system only.
  if(selection.profile!=="fallback")return {profile:selection.profile,available:false,runs:[],reason:"The dedicated AI Repair Actions worker is configured for Fallback only.",checkedAt:new Date().toISOString()};
  const repo="remipetrovich-design/AI-Repair-Centre";
- const workerToken=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ const workerToken=String(process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
  if(!workerToken)throw Error("AI Repair worker GitHub access is not configured.");
  const headers={Authorization:"Bearer "+workerToken,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"};
  const get=async(path:string)=>{
@@ -178,7 +178,7 @@ export const dispatchAiSourceValidation=createServerFn({method:"POST"}).handler(
  const eligible=[{system:"base",repo:selection.baseRepo},{system:"engine",repo:selection.engineRepo}].find(item=>item.repo===data.repo);
  if(!eligible)throw Error("Only the active profile's Base and Engine source commits may be validated");
  if(!/^[a-f0-9]{40}$/i.test(data.sha))throw Error("Exact commit SHA required");
- const workerToken=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ const workerToken=String(process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
  if(!workerToken)throw Error("AI_REPAIR_WORKER_GITHUB_TOKEN not configured. Manual source validation is unavailable.");
  const workerRepo="remipetrovich-design/AI-Repair-Centre";
  const response=await fetch("https://api.github.com/repos/"+workerRepo+"/actions/workflows/validate-source.yml/dispatches",{
@@ -253,7 +253,7 @@ export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async(
 type RepairSettings={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
 const DEFAULT_REPAIR_SETTINGS:RepairSettings={enabled:false,auto_diagnose:false,enable_base:true,enable_engine:true,enable_release_worker:false,enable_sql_diagnosis:false,lookback_hours:6,daily_ai_limit:1,model:"openrouter/free",show_github_failures:true,auto_archive_days:0,incident_page_size:100};
 const REPAIR_SETTINGS_FIELDS=["enabled","auto_diagnose","enable_base","enable_engine","enable_release_worker","enable_sql_diagnosis","show_github_failures"] as const;
-function workerGithubToken(){return String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.ORBITFS_FALLBACK_GITHUB_TOKEN||"").trim();}
+function workerGithubToken(){return String(process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();}
 function repairDbKey(){return String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"").trim();}
 async function repairDbRead(path:string,options?:{method:"GET"|"POST";body?:object}){
  const key=repairDbKey();
@@ -353,7 +353,7 @@ export const requestAiRepairRunDiagnosis=createServerFn({method:"POST"}).handler
  if(!allowed.includes(data.repo))throw Error("Cannot repair repository outside the active GitHub profile");
  const run=await(await github(data.repo,"/actions/runs/"+data.runId,selection.profile)).json();
  if(run.conclusion!=="failure")throw Error("The selected GitHub workflow is not failed");
- const repairToken=String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
+ const repairToken=String(process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();
  if(!repairToken)throw Error("AI_REPAIR_WORKER_GITHUB_TOKEN is missing from this Dev Panel Production environment");
  const payload={ref:"main",inputs:{verify_only:"false",apply_fix:"true",target_repo:data.repo,target_run_id:String(data.runId)}};
  const response=await fetch("https://api.github.com/repos/remipetrovich-design/AI-Repair-Centre/actions/workflows/automatic-diagnosis.yml/dispatches",{
