@@ -14,13 +14,13 @@ test('document-only routing never handles API calls, POST, assets or previews',(
  assert.equal(allowedDocumentRequest(req('dev.incendiarynetworks.cc','/settings','GET','application/json')),false);
 });
 test('FALLBACK READY redirects only to the configured Production service',async()=>{
- const state={mode:'fallback',ready:{panel:true},targets:{panel:'https://orbitfs-dev-panel-fallback.vercel.app'}};
+ const state={mode:'fallback',ready:{panel:true},targets:{panel:'https://dev1.incendiarynetworks.cc'}};
  const response=await activePanelRedirect(req(),async()=>new Response(JSON.stringify(state),{status:200}));
  assert.equal(response.status,307);
- assert.equal(response.headers.get('location'),'https://orbitfs-dev-panel-fallback.vercel.app/settings?tab=vault');
+ assert.equal(response.headers.get('location'),'https://dev1.incendiarynetworks.cc/settings?tab=vault');
 });
 test('MAIN, unready target, authority failure or modified destination preserve current entrypoint',async()=>{
- const body={mode:'fallback',ready:{panel:false},targets:{panel:'https://orbitfs-dev-panel-fallback.vercel.app'}};
+ const body={mode:'fallback',ready:{panel:false},targets:{panel:'https://dev1.incendiarynetworks.cc'}};
  const cases=[
   {...body,mode:'main',ready:{panel:true}},
   body,
