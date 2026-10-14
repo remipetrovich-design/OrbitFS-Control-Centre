@@ -135,7 +135,8 @@ export function AiRepairWorkspace({session}:{session:any}){
   catch(e:any){setError(e.message||"Worker verification could not start")}
   finally{setBusy("")}
  }
- useEffect(()=>{if(section==="settings")void loadControls()},[section,token]);
+ useEffect(()=>{void loadControls()},[token]);
+ useEffect(()=>{if(section==="settings"&&policy?.enabled===true)void loadControls()},[section,token]);
  const refreshLive=useCallback(async()=>{
   if(liveInFlight.current)return;
   liveInFlight.current=true;setLiveBusy(true);setLiveError("");
@@ -144,7 +145,7 @@ export function AiRepairWorkspace({session}:{session:any}){
   finally{liveInFlight.current=false;setLiveBusy(false)}
  },[token]);
  useEffect(()=>{
-  if(!repairTracking)return;
+  if(!repairTracking||policy?.enabled!==true)return;
   let cancelled=false;
   let timer:ReturnType<typeof setInterval>|null=null;
   const check=async()=>{
@@ -169,10 +170,31 @@ export function AiRepairWorkspace({session}:{session:any}){
   void check();
   timer=window.setInterval(()=>void check(),60000);
   return()=>{cancelled=true;if(timer!==null)window.clearInterval(timer)};
- },[repairTracking,token]);
+ },[repairTracking,token,policy?.enabled]);
  const total=rows.length;
  const current=overview?.selection;
  const available=Boolean(service?.available);
+ const toggleMaster=async(enabled:boolean)=>{
+  if(!policy)return;
+  setBusy("master-toggle");setError("");
+  try{
+   const next={...policy,enabled};
+   const result=await saveAiRepairControls({data:{token,settings:next}});
+   setPolicy(result.settings||next);setRepairTracking(null);
+   if(!enabled){setOverview(null);setService(null);setLive(null);setIncidents([]);setArchivedRuns([])}
+   setNotice(enabled?"AI Repair Centre enabled.":"AI Repair Centre disabled. No repair polling or new actions.");
+  }catch(e:any){setError(e.message||"Unable to change master setting")}
+  finally{setBusy("")}
+ };
+ if(policy?.enabled!==true)return <section className="space-y-4">
+  <div className="orbit-reference-page-head"><p>OPERATIONS</p><h1>AI Repair Centre</h1><span>{policy?"Disabled for this mode":"Checking master setting"}</span></div>
+  {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
+  <div className="rounded-lg border p-4 space-y-3">
+   <p className="text-sm">{policy?"The AI Repair Centre is fully disabled for this mode. Its monitoring, polling, GitHub checks and repair actions are blocked. Existing incidents are preserved.":"AI Repair Centre actions stay off until the master setting can be read."}</p>
+   <div className="flex gap-2"><button type="button" className="button-secondary" onClick={()=>void loadControls()} disabled={Boolean(busy)}>Refresh setting</button>
+   {policy&&<button type="button" className="button-primary" onClick={()=>void toggleMaster(true)} disabled={Boolean(busy)}>Enable AI Repair Centre</button>}</div>
+  </div>
+ </section>;
  return <div className="space-y-4">
   <div className="flex flex-wrap items-start justify-between gap-3">
    <div><p className="orbit-reference-kicker">OPERATIONS / AI REPAIR</p><h1 className="text-2xl font-bold tracking-tight">AI Repair Centre</h1><p className="mt-1 text-sm text-muted-foreground">One workspace for Base and Shared Engine failures, across Main and Fallback.</p></div>
@@ -180,6 +202,10 @@ export function AiRepairWorkspace({session}:{session:any}){
   </div>
   {error&&<div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
   {notice&&<div className="rounded-lg border border-border px-3 py-2 text-sm">{notice}<button className="ml-3 underline" onClick={()=>setNotice("")}>Dismiss</button></div>}
+  <section className="rounded-lg border p-3 flex flex-wrap items-center justify-between gap-3">
+    <div><strong className="text-xs">AI Repair Centre master switch</strong><p className="text-xs text-muted-foreground">Turning off blocks new checks and repairs for this mode; saved incidents remain.</p></div>
+    <button className="button-secondary" type="button" disabled={Boolean(busy)} onClick={()=>void toggleMaster(false)}>Disable AI Repair Centre completely</button>
+  </section>
   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
    {[
     ["Failed runs",String(runs.length),Activity],
