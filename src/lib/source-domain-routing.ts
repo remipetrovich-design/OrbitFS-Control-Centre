@@ -3,7 +3,7 @@
 // API calls, assets, uploads and background release requests stay untouched.
 const AUTHORITY_URL='https://incendiarynetworks.cc/api/v1/source-routing';
 const MAIN_PUBLIC_HOST='dev.incendiarynetworks.cc';
-const FALLBACK_URL='https://orbitfs-dev-panel-fallback.vercel.app';
+const FALLBACK_URL='https://dev1.incendiarynetworks.cc';
 
 export function allowedDocumentRequest(request:Request):boolean{
   const url=new URL(request.url);
