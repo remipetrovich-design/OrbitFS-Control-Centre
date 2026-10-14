@@ -26,6 +26,7 @@ async function active(){
 }
 export const getAiRepairOverview=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  const targets=[{kind:"base" as const,repo:selection.baseRepo},{kind:"engine" as const,repo:selection.engineRepo},{kind:"base" as const,repo:githubProfileDefinitions()[selection.profile].devPanel.repo}];
  const statuses=await Promise.allSettled(targets.map(async ({kind,repo})=>{
@@ -59,6 +60,7 @@ async function repairService(path:string,method:"GET"|"POST"="GET",payload?:unkn
 // Read-only live worker console. Status comes from GitHub Actions, never a local copy.
 export const getAiRepairLiveActions=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  // The scheduled diagnosis worker currently belongs to the Fallback system only.
  if(selection.profile!=="fallback")return {profile:selection.profile,available:false,runs:[],reason:"The dedicated AI Repair Actions worker is configured for Fallback only.",checkedAt:new Date().toISOString()};
@@ -94,6 +96,7 @@ export const getAiRepairLiveActions=createServerFn({method:"POST"}).handler(asyn
 
 export const getAiRepairRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  const kind=data.repo===githubProfileDefinitions()[selection.profile].devPanel.repo?"base":(["base","engine"] as const).find(k=>source(k,selection.profile)===data.repo);
  if(!kind)throw Error("Run does not belong to current active profile");
@@ -106,6 +109,7 @@ export const getAiRepairRun=createServerFn({method:"POST"}).handler(async({data}
 });
 export const getAiRepairJobLog=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;jobId:number}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  if(![selection.baseRepo,selection.engineRepo,githubProfileDefinitions()[selection.profile].devPanel.repo].includes(data.repo))throw Error("Repository is not in the active profile");
  const response=await github(data.repo,"/actions/jobs/"+safeId(data.jobId)+"/logs",selection.profile,"application/vnd.github+json");
@@ -114,6 +118,7 @@ export const getAiRepairJobLog=createServerFn({method:"POST"}).handler(async({da
 });
 export const getAiRepairServiceState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(!workerConfig().configured){
   const historyAvailable=Boolean(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY);
   return {configured:historyAvailable,available:false,historyAvailable,mode:historyAvailable?"scheduled-github-actions":"unconfigured",automaticAIRequestsEnabled:historyAvailable,error:historyAvailable?"Repair history connected. Scheduled GitHub Actions diagnosis requires a successful worker run. Manual sandbox actions need a dedicated backend.":"Set REPAIR_SUPABASE_SERVICE_ROLE_KEY in the Dev Panel server to read persisted diagnoses."};
@@ -122,6 +127,7 @@ export const getAiRepairServiceState=createServerFn({method:"POST"}).handler(asy
 });
 export const getAiRepairIncidents=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(workerConfig().configured)return await repairService("incidents");
  const selection=await active();
  if(!process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY)return {incidents:[],historyAvailable:false};
@@ -136,6 +142,7 @@ export const getAiRepairIncidents=createServerFn({method:"POST"}).handler(async(
 });
 export const getAiRepairIncident=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;source?:boolean}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(!/^[a-z0-9-]{1,80}$/i.test(data.incidentId))throw Error("Invalid incident ID");
  if(workerConfig().configured)return await repairService("incidents/"+data.incidentId+(data.source?"?source=true":""));
  const selection=await active();
@@ -153,17 +160,20 @@ export const getAiRepairIncident=createServerFn({method:"POST"}).handler(async({
 });
 export const requestAiRepairDiagnosis=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;confirm:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(data.confirm!=="RUN_AI_DIAGNOSIS")throw Error("Explicit confirmation required");
  return await repairService("diagnose","POST",{incidentId:data.incidentId,confirm:data.confirm});
 });
 export const validateAiRepairProposal=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;proposal:any;confirm:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(data.confirm!=="VALIDATE_ISOLATED_REPAIR")throw Error("Explicit validation confirmation required");
  return await repairService("validate","POST",{incidentId:data.incidentId,proposal:data.proposal,confirm:data.confirm});
 });
 
 export const dispatchAiSourceValidation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;sha:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  const eligible=[{system:"base",repo:selection.baseRepo},{system:"engine",repo:selection.engineRepo}].find(item=>item.repo===data.repo);
  if(!eligible)throw Error("Only the active profile's Base and Engine source commits may be validated");
@@ -218,6 +228,7 @@ async function savedRepairForRun(repo:string,runId:string,profile:"primary"|"fal
 }
 export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number;type:"base"|"engine";savedError?:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  const type=requireKind(data.type);
  const authorisedRepos=type==="base"?[selection.baseRepo,githubProfileDefinitions()[selection.profile].devPanel.repo]:[selection.engineRepo];
@@ -258,6 +269,10 @@ async function repairSettings(){
  const rows=await repairDbRead("repair_settings?profile=eq."+activeProfile+"&limit=1");
  return {profile:activeProfile,settings:rows?.[0]||null};
 }
+async function requireAiRepairEnabled(){
+ const state=await repairSettings();
+ if(state.settings?.enabled!==true)throw Error("AI Repair Centre is disabled for this mode. Enable it in AI Repair settings.");
+}
 export const getAiRepairControls=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
  const selection=await active();
@@ -291,6 +306,7 @@ export const saveAiRepairControls=createServerFn({method:"POST"}).handler(async(
 });
 export const requestAiRepairWorkerCheck=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;verifyOnly:boolean}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  const selection=await active();
  if(data.verifyOnly!==true)throw Error("Only read-only worker verification can be dispatched here");
  const token=workerGithubToken();
@@ -305,6 +321,7 @@ export const requestAiRepairWorkerCheck=createServerFn({method:"POST"}).handler(
 
 export const archiveAiRepairIncident=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;incidentId:string;confirm:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(data.confirm!=="DELETE_FROM_REPAIR_CENTRE")throw Error("Explicit delete confirmation required");
  if(!/^[a-f0-9]{20,64}$/.test(data.incidentId))throw Error("Invalid incident ID");
  const profile=(await active()).profile==="primary"?"main":"fallback";
@@ -314,6 +331,7 @@ export const archiveAiRepairIncident=createServerFn({method:"POST"}).handler(asy
 
 export const hideAiRepairGithubRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number;confirm:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(data.confirm!=="HIDE_GITHUB_FAILURE")throw Error("Confirmation required");
  if(!Number.isSafeInteger(data.runId)||data.runId<=0)throw Error("Invalid run ID");
  const selection=await active();
@@ -326,6 +344,7 @@ export const hideAiRepairGithubRun=createServerFn({method:"POST"}).handler(async
 
 export const requestAiRepairRunDiagnosis=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId:number;confirm:string}})=>{
  requireOwner(data.token);
+ await requireAiRepairEnabled();
  if(data.confirm!=="REQUEST_AI_REPAIR")throw Error("Explicit repair request confirmation required");
  if(!Number.isSafeInteger(data.runId)||data.runId<=0)throw Error("Invalid workflow run ID");
  const selection=await active();
