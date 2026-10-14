@@ -1758,7 +1758,7 @@ const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] 
 const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
 
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
- const token=String(process.env.GITHUB_RELEASE_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
+ const token=String(process.env.MAIN_MASTER_DATABASE_GITHUB_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
  if(!token)throw new Error("Master Database GitHub control token is not configured.");
  return requestJson("https://api.github.com"+path,{
   ...init,
@@ -2061,7 +2061,7 @@ async function repositorySyncConfig(){
 }
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
- const token=required(cfg.side==="primary"?"ORBITFS_RELEASE_DISPATCH_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
+ const token=required(cfg.side==="primary"?(process.env.MAIN_GITHUB_RELEASE_TOKEN?"MAIN_GITHUB_RELEASE_TOKEN":"ORBITFS_RELEASE_DISPATCH_TOKEN"):(process.env.FALLBACK_GITHUB_RELEASE_TOKEN?"FALLBACK_GITHUB_RELEASE_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN"));
  try{
   return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
  }catch(error:any){
