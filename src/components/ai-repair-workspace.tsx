@@ -105,7 +105,7 @@ export function AiRepairWorkspace({session}:{session:any}){
  }
  async function loadControls(){
   setBusy("repair-settings");setError("");
-  try{const next=await getAiRepairControls({data:{token}});setControls(next);setPolicy(next.settings||null)}
+  try{const next=await getAiRepairControls({data:{token}});setControls(next);setPolicy(next.settings||null);if(!next.connected)setError(next.message||"AI Repair settings database is not configured.")}
   catch(e:any){setError(e.message||"Repair settings cannot be loaded")}
   finally{setBusy("")}
  }
@@ -187,10 +187,10 @@ export function AiRepairWorkspace({session}:{session:any}){
   finally{setBusy("")}
  };
  if(policy?.enabled!==true)return <section className="space-y-4">
-  <div className="orbit-reference-page-head"><p>OPERATIONS</p><h1>AI Repair Centre</h1><span>{policy?"Disabled for this mode":"Checking master setting"}</span></div>
+  <div className="orbit-reference-page-head"><p>OPERATIONS</p><h1>AI Repair Centre</h1><span>{policy?"Disabled for this mode":controls?.connected===false?"Settings connection missing":"Checking master setting"}</span></div>
   {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
   <div className="rounded-lg border p-4 space-y-3">
-   <p className="text-sm">{policy?"The AI Repair Centre is fully disabled for this mode. Its monitoring, polling, GitHub checks and repair actions are blocked. Existing incidents are preserved.":"AI Repair Centre actions stay off until the master setting can be read."}</p>
+   <p className="text-sm">{policy?"AI Repair Centre is disabled for this mode. No monitoring, polling, API checks or repair dispatches run. Saved incidents remain intact.":controls?.message||"Loading the saved master setting. AI Repair remains off until the mode configuration can be verified."}</p>
    <div className="flex gap-2"><button type="button" className="button-secondary" onClick={()=>void loadControls()} disabled={Boolean(busy)}>Refresh setting</button>
    {policy&&<button type="button" className="button-primary" onClick={()=>void toggleMaster(true)} disabled={Boolean(busy)}>Enable AI Repair Centre</button>}</div>
   </div>
