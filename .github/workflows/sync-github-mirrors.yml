@@ -3,6 +3,14 @@ name: Sync GitHub mirrors
 on:
   workflow_dispatch:
     inputs:
+      preview:
+        description: Preview/preflight only; never push changes
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
       confirmation:
         description: Type SYNC to mirror all five main branches in this direction
         required: true
@@ -469,7 +477,16 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Preview summary
+        if: ${{ inputs.preview != 'false' }}
+        shell: bash
+        run: |
+          echo "## Five-pair synchronization preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "No changes pushed. Review this preflight before approving Apply in Dev Panel." >> "$GITHUB_STEP_SUMMARY"
+          for key in base engine license billing control; do echo "- $key: $(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")" >> "$GITHUB_STEP_SUMMARY"; done
+
       - name: Apply and verify
+        if: ${{ inputs.preview == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
