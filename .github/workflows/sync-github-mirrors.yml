@@ -426,7 +426,7 @@ jobs:
                 if [ "$argument" = "--exclude=$changed" ]; then protected=true; break; fi
               done
               if [ "$protected" = true ]; then continue; fi
-              if [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] && cmp -s "$src/$changed" "$dst/$changed"; then continue; fi
+              # Destination-only files are retained, not conflicts.\n              if [ ! -e "$src/$changed" ]; then continue; fi\n              if [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] && cmp -s "$src/$changed" "$dst/$changed"; then continue; fi
               echo "::error::$key has an independent portable change: $changed. Manual conflict resolution required."
               exit 1
             done < <(git -C "$dst" diff --name-only "$last_mirror" HEAD)
