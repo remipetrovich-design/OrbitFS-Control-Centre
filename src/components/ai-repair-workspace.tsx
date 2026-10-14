@@ -146,6 +146,7 @@ export function AiRepairWorkspace({session}:{session:any}){
  useEffect(()=>{
   if(!repairTracking)return;
   let cancelled=false;
+  let timer:ReturnType<typeof setInterval>|null=null;
   const check=async()=>{
    if(document.visibilityState!=="visible")return;
    try{
@@ -157,12 +158,17 @@ export function AiRepairWorkspace({session}:{session:any}){
     const workerRuns=(status.runs||[]).filter((x:any)=>new Date(x.createdAt||x.startedAt||0).getTime()>=started-60000&&String(x.displayTitle||"").includes(repairTracking.repo+" #"+repairTracking.runId));
     const latest=workerRuns.sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime())[0];
     setRepairProgress({worker:latest||null,incidents:matching,checkedAt:new Date().toISOString(),available:status.available});
+    // Poll only a submitted failed-job repair while its worker is unfinished.
+    // A completed worker needs no further GitHub checks, regardless of outcome.
+    if(latest?.status==="completed" || ["success","failure","cancelled","skipped","timed_out"].includes(String(latest?.conclusion||""))){
+      if(timer!==null){window.clearInterval(timer);timer=null;}
+    }
     setRepairProgressError("");
    }catch(e:any){if(!cancelled)setRepairProgressError(e?.message||"Worker status unavailable")}
   };
   void check();
-  const timer=window.setInterval(()=>void check(),60000);
-  return()=>{cancelled=true;window.clearInterval(timer)};
+  timer=window.setInterval(()=>void check(),60000);
+  return()=>{cancelled=true;if(timer!==null)window.clearInterval(timer)};
  },[repairTracking,token]);
  const total=rows.length;
  const current=overview?.selection;
@@ -222,7 +228,7 @@ export function AiRepairWorkspace({session}:{session:any}){
     {repairTracking&&repairTracking.repo===selected.repo&&repairTracking.runId===Number(selected.runId)&&<Card title="Submitted repair — live progress">
       <div className="flex flex-wrap items-center gap-2"><Pill label={repairProgress?.worker?.conclusion||repairProgress?.worker?.status||"Waiting for worker run"}/><span className="text-xs text-muted-foreground">Last checked: {date(repairProgress?.checkedAt)}</span><a className="text-xs underline" href={repairProgress?.worker?.url||repairTracking.workerUrl} target="_blank" rel="noreferrer">Open GitHub Actions</a></div>
       {repairProgressError&&<p role="alert" className="text-xs text-destructive">{repairProgressError}</p>}
-      {!repairProgress?.worker&&<p className="text-xs text-muted-foreground">Dispatch accepted; GitHub has not returned a new worker run yet. Refreshing every 10 seconds while this page is open.</p>}
+      {!repairProgress?.worker&&<p className="text-xs text-muted-foreground">Dispatch accepted; GitHub has not returned a new worker run yet. Checking once per minute only while the submitted failed-job repair is running.</p>}
       {(repairProgress?.worker?.jobs||[]).map((job:any)=><div key={job.id} className="rounded-md border border-border p-2 space-y-1"><p className="text-xs font-semibold">{job.name} · {job.conclusion||job.status}</p>{(job.steps||[]).map((step:any)=><p key={step.number} className="text-xs text-muted-foreground">{step.number}. {step.name} — {step.conclusion||step.status}</p>)}</div>)}
       {repairProgress?.incidents?.length>0?<div className="space-y-2">{repairProgress.incidents.map((item:any)=><div key={item.id} className="rounded-md border border-border p-2 text-xs"><p>Diagnosis saved: {item.classification||item.status||"pending"}</p><button className="button-secondary mt-2" onClick={()=>void open({...item,origin:"stored"})}>View diagnosis / proposed fix</button></div>)}</div>:<p className="text-xs text-muted-foreground">No diagnosis record for this run has appeared yet.</p>}
       <p className="text-xs text-muted-foreground">The worker attempts an isolated validation and safe main-branch repair. Automatic packaging retry requires a recoverable workflow_dispatch input set; release approval and publication remain manual.</p>
