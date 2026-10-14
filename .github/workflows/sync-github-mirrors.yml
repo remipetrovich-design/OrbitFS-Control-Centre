@@ -431,6 +431,9 @@ jobs:
             git -C "$dst" config user.name "OrbitFS Repository Sync"
             git -C "$dst" config user.email "actions@users.noreply.github.com"
             git -C "$dst" add -A
+            # Feature sync must never remove existing destination code.
+            deleted="$(git -C "$dst" diff --cached --diff-filter=D --name-only)"
+            test -z "$deleted" || { echo "::error::Sync attempted destination deletions for $key; refusing."; printf '%s\n' "$deleted"; exit 1; }
             while IFS= read -r staged; do
               [ -n "$staged" ] || continue
               case "$staged" in
