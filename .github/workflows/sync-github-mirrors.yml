@@ -29,6 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${{ vars.ORBITFS_REPOSITORY_SYNC_ENABLED }}" = "true" || { echo "::error::Cross-mode sync is disabled. Explicitly activate repository variable ORBITFS_REPOSITORY_SYNC_ENABLED=true before manual dispatch."; exit 1; }
           test "${{ inputs.confirmation }}" = "SYNC" || { echo "::error::Confirmation must be SYNC."; exit 1; }
           case "$GITHUB_REPOSITORY" in
             lucaskerim123/Dev-panel|remipetrovich-design/OrbitFS-Control-Centre) ;;
@@ -422,9 +423,9 @@ jobs:
               exit 1
             done < <(git -C "$dst" diff --name-only "$last_mirror" HEAD)
             echo "::notice::$key protected configuration is excluded from this transfer."
-            rsync -a --delete "${excludes[@]}" "$src/" "$dst/"
+            rsync -a "${excludes[@]}" "$src/" "$dst/"
 
-            remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
+            remaining="$(rsync -ani "${excludes[@]}" "$src/" "$dst/")"
             test -z "$remaining" || { echo "::error::Mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
 
             git -C "$dst" config user.name "OrbitFS Repository Sync"
@@ -511,6 +512,13 @@ jobs:
                 --exclude=".vercel/"
                 --exclude=".env"
                 --exclude=".env.*"
+                --exclude="**/.env"
+                --exclude="**/.env.*"
+                --exclude="**/.vercel/**"
+                --exclude="**/secrets/**"
+                --exclude="**/.aws/**"
+                --exclude="**/service-account.json"
+                --exclude="**/credentials.json"
                 --exclude="*.pem"
                 --exclude="*.key"
                 --exclude="*.p12"
@@ -567,7 +575,7 @@ jobs:
                   excludes+=(--exclude="src/start.ts")
                   ;;
               esac
-              remaining="$(rsync -ani --delete "${excludes[@]}" "$src/" "$dst/")"
+              remaining="$(rsync -ani "${excludes[@]}" "$src/" "$dst/")"
               test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
               echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
             else
