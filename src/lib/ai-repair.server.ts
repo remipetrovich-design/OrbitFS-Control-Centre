@@ -251,6 +251,7 @@ export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async(
 
 
 type RepairSettings={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
+const DEFAULT_REPAIR_SETTINGS:RepairSettings={enabled:false,auto_diagnose:false,enable_base:true,enable_engine:true,enable_release_worker:false,enable_sql_diagnosis:false,lookback_hours:6,daily_ai_limit:1,model:"openrouter/free",show_github_failures:true,auto_archive_days:0,incident_page_size:100};
 const REPAIR_SETTINGS_FIELDS=["enabled","auto_diagnose","enable_base","enable_engine","enable_release_worker","enable_sql_diagnosis","show_github_failures"] as const;
 function workerGithubToken(){return String(process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.ORBITFS_FALLBACK_GITHUB_TOKEN||"").trim();}
 function repairDbKey(){return String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"").trim();}
@@ -267,7 +268,7 @@ async function repairDbRead(path:string,options?:{method:"GET"|"POST";body?:obje
 async function repairSettings(){
  const activeProfile=(await active()).profile==="primary"?"main":"fallback";
  const rows=await repairDbRead("repair_settings?profile=eq."+activeProfile+"&limit=1");
- return {profile:activeProfile,settings:rows?.[0]||null};
+ return {profile:activeProfile,settings:{...DEFAULT_REPAIR_SETTINGS,...(rows?.[0]||{})}};
 }
 async function requireAiRepairEnabled(){
  const state=await repairSettings();
@@ -278,7 +279,7 @@ export const getAiRepairControls=createServerFn({method:"POST"}).handler(async({
  const selection=await active();
  const profile=selection.profile==="primary"?"main":"fallback";
  const connected=Boolean(repairDbKey());
- if(!connected)return {profile,connected:false,settings:null,counts:null,workerDispatchConfigured:Boolean(workerGithubToken()),message:"Set the Dev Panel server-side REPAIR_SUPABASE_SERVICE_ROLE_KEY on the correct Vercel project."};
+ if(!connected)return {profile,connected:false,settings:null,counts:null,workerDispatchConfigured:false,message:"AI Repair settings unavailable: REPAIR_SUPABASE_SERVICE_ROLE_KEY is missing. Configure it for this mode; operations stay disabled."};
  const [{settings},usage,incidents]=await Promise.all([
   repairSettings(),
   repairDbRead("repair_ai_usage?select=id&usage_day=eq."+new Date().toISOString().slice(0,10)),
