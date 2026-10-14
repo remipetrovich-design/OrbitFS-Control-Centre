@@ -377,6 +377,7 @@ jobs:
                 excludes+=(--exclude="tools/source-mode-switch.test.mjs")
                 ;;
               engine)
+                excludes+=(--exclude="src/lib/server/license.ts")
                 excludes+=(--exclude="release/update-baseline.json")
                 excludes+=(--exclude="tools/build-database-package.mjs")
                 ;;
@@ -562,6 +563,7 @@ jobs:
                   excludes+=(--exclude="tools/source-mode-switch.test.mjs")
                   ;;
                 engine)
+                  excludes+=(--exclude="src/lib/server/license.ts")
                   excludes+=(--exclude="release/update-baseline.json")
                   excludes+=(--exclude="tools/build-database-package.mjs")
                   ;;
