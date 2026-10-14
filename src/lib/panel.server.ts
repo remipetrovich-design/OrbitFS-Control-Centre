@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
+import {emitDiagnostic} from "@/lib/incendiary-diagnostic";
 import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
 import {operationsWorkflowRunPaths} from "@/lib/operations-workflow-runs.mjs";
 import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
@@ -1711,12 +1712,16 @@ async function github(path:string,init:RequestInit={}){
  }
  if(key&&githubInFlight.has(key))return githubInFlight.get(key)!;
  const request=(async()=>{
+  const start=Date.now();
+  const request_id=crypto.randomUUID?.()||Math.random().toString(36).slice(2);
   try{
    const value=await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+await githubToken(),"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+   emitDiagnostic({direction:"egress",source_system:"dev_panel",target:"github",account_mode:localGithubProfileName()==="fallback"?"fallback":"main",method,endpoint:path,status:200,request_id,latency_ms:Date.now()-start,error:null});
    if(key)githubReadCache.set(key,{value,expires:Date.now()+120_000,staleUntil:Date.now()+30*60*1000});
    return value;
   }catch(error:any){
    const message=String(error?.message||error);
+   emitDiagnostic({direction:"egress",source_system:"dev_panel",target:"github",account_mode:localGithubProfileName()==="fallback"?"fallback":"main",method,endpoint:path,status:0,request_id,latency_ms:Date.now()-start,error:message});
    if(/rate limit|secondary rate|abuse detection|HTTP 429|API rate/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+5*60_000);
    if(cached&&cached.staleUntil>Date.now())return cached.value;
    if(/bad credentials/i.test(message))throw new Error("GitHub credential rejected (401). Check the selected source profile's GitHub token and repository permissions.");
