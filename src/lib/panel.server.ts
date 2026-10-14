@@ -1698,6 +1698,7 @@ async function requestJson(url:string,init:RequestInit={}){
  return body;
 }
 const githubReadCache=new Map<string,{value:any;expires:number;staleUntil:number}>();
+const githubInFlight=new Map<string,Promise<any>>();
 let githubRateLimitedUntil=0;
 async function github(path:string,init:RequestInit={}){
  const method=String(init.method||"GET").toUpperCase();
@@ -1706,20 +1707,24 @@ async function github(path:string,init:RequestInit={}){
  if(cached&&cached.expires>Date.now())return cached.value;
  if(method==="GET"&&githubRateLimitedUntil>Date.now()){
   if(cached&&cached.staleUntil>Date.now())return cached.value;
-  throw new Error("GitHub API rate limit is cooling down; live status will resume automatically.");
+  throw new Error("GitHub API rate limit is cooling down until "+new Date(githubRateLimitedUntil).toISOString()+".");
  }
- try{
-  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${await githubToken()}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
-  if(key)githubReadCache.set(key,{value,expires:Date.now()+30_000,staleUntil:Date.now()+5*60*1000});
-  else githubReadCache.clear();
-  return value;
- }catch(error:any){
-  const message=String(error?.message||error);
-  if(/rate limit/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
-  if(cached&&cached.staleUntil>Date.now())return cached.value;
-  if(/bad credentials/i.test(message))throw new Error("Main GitHub credential rejected (401). Verify ORBITFS_RELEASE_DISPATCH_TOKEN in Main Dev Panel Vercel Production belongs to lucaskerim123 and has access to the selected Main repository.");
-  throw error;
- }
+ if(key&&githubInFlight.has(key))return githubInFlight.get(key)!;
+ const request=(async()=>{
+  try{
+   const value=await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+await githubToken(),"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+   if(key)githubReadCache.set(key,{value,expires:Date.now()+120_000,staleUntil:Date.now()+30*60*1000});
+   return value;
+  }catch(error:any){
+   const message=String(error?.message||error);
+   if(/rate limit|secondary rate|abuse detection|HTTP 429|API rate/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+5*60_000);
+   if(cached&&cached.staleUntil>Date.now())return cached.value;
+   if(/bad credentials/i.test(message))throw new Error("GitHub credential rejected (401). Check the selected source profile's GitHub token and repository permissions.");
+   throw error;
+  }
+ })();
+ if(key)githubInFlight.set(key,request);
+ try{return await request}finally{if(key)githubInFlight.delete(key)}
 }
 async function licenseMaster(path:string,init:RequestInit={}){
  const base=await configuredMasterUrl();
