@@ -1586,7 +1586,32 @@ export const controlRelease=createServerFn({method:"POST"}).handler(async({data}
 export const getChannelsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
  const channels=await licenseMaster('/release-channels?include_disabled=true');
- return {channels:channels?.channels||[],warnings:[]};
+ const definitions=Array.isArray(channels?.channels)?channels.channels:[];
+ const sources=await githubContext();
+ const candidates=[
+  {type:"base",repo:sources.BASE_REPO,ref:sources.BASE_REF},
+  {type:"update",repo:sources.ENGINE_REPO,ref:sources.ENGINE_REF},
+ ];
+ const heads=await Promise.all(candidates.map(async source=>{
+  try{
+   const result=await github("/repos/"+source.repo+"/git/ref/heads/"+encodeURIComponent(source.ref));
+   return {...source,head:String(result?.object?.sha||""),error:null};
+  }catch(error:any){return {...source,head:"",error:String(error?.message||"Source lookup unavailable")}}
+ }));
+ const freshness=await Promise.all(definitions.flatMap((definition:any)=>{
+  const channel=String(definition.channel||"").trim().toLowerCase();
+  if(!channel)return [];
+  return heads.map(async source=>{
+   try{
+    const release=await licenseMaster("/releases?product=orbitfs_base&channel="+encodeURIComponent(channel)+"&type="+source.type+"&include_archived=false");
+    const rows=Array.isArray(release?.releases)?release.releases:[];
+    const published=rows.filter((row:any)=>row.status==="published"&&!row.archived_at).sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+    const publishedSha=String(published?.source_sha||published?.source_commit||"");
+    return {channel,type:source.type,repo:source.repo,ref:source.ref,head:source.head,publishedSha,version:published?.version||null,status:!source.head?"unavailable":!published?"no-published-release":!publishedSha?"unknown":publishedSha===source.head?"current":"source-ahead"};
+   }catch(error:any){return {channel,type:source.type,repo:source.repo,ref:source.ref,head:source.head,publishedSha:"",version:null,status:"unavailable"}}
+  });
+ }));
+ return {channels:definitions,freshness,warnings:[]};
 });
 
 export const getAuditState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;limit?:number}})=>{
