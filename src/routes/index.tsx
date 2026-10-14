@@ -829,23 +829,56 @@ function RepositoryCard({title,repo,refName,workflow,icon:Icon,onCreate}:any) {
 }
 
 function ChannelsPage({channels,session}:any) {
-  const [state,setState]=useState<any>({channels:[],warnings:[]});
+  const [state,setState]=useState<any>({channels:[],freshness:[],warnings:[]});
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
-  const loadChannels=async()=>{setLoading(true);setError("");try{setState(await getChannelsState({data:{token:session.token}}))}catch(x:any){setError(x.message||"Unable to load channels.")}finally{setLoading(false)}};
-  useEffect(()=>{void loadChannels()},[session.token]);
+  const [checkedAt,setCheckedAt]=useState("");
+  const [autoCheck,setAutoCheck]=useState(true);
+  const pending=useRef(false);
+  const checkNow=async()=>{
+    if(pending.current)return;
+    pending.current=true;setLoading(true);setError("");
+    try{setState(await getChannelsState({data:{token:session.token}}));setCheckedAt(new Date().toISOString())}
+    catch(x:any){setError(x.message||"Unable to check release channels.")}
+    finally{pending.current=false;setLoading(false)}
+  };
+  useEffect(()=>{
+    void checkNow();
+    if(!autoCheck)return;
+    const timer=window.setInterval(()=>{if(!document.hidden)void checkNow()},120000);
+    const onVisible=()=>{if(!document.hidden)void checkNow()};
+    document.addEventListener("visibilitychange",onVisible);
+    return ()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",onVisible)};
+  },[session.token,autoCheck]);
   const rows=state.channels.length?state.channels:channels.map((x:string)=>({channel:x,label:x,enabled:true,customer_visible:true,access_mode:"closed"}));
   return <section className="space-y-4">
-    <div className="flex flex-col justify-between gap-3 border-b pb-5 md:flex-row md:items-end"><PageHead title="Release Channels" detail="Read-only License Manager channel reference for Stage 1 release preparation."/><button className="button-secondary" onClick={loadChannels} disabled={loading}><RefreshCw size={14} className={loading?"animate-spin":""}/> Refresh</button></div>
+    <div className="flex flex-col justify-between gap-3 border-b pb-5 md:flex-row md:items-end">
+      <PageHead title="Release Channels" detail="License Manager channel state compared with the selected mode's Base and Update source refs."/>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={autoCheck} onChange={e=>setAutoCheck(e.target.checked)}/> Auto-check every 2 min</label>
+        <button className="button-secondary" onClick={()=>void checkNow()} disabled={loading}><RefreshCw size={14} className={loading?"animate-spin":""}/> Check now</button>
+      </div>
+    </div>
+    {checkedAt&&<p className="text-xs text-muted-foreground">Last checked: {new Date(checkedAt).toLocaleString()}. Status compares the published release source commit with the current active source ref; it does not publish or deploy anything.</p>}
     {error&&<Alert tone="error" onClose={()=>setError("")}>{error}</Alert>}
     <section className="release-surface overflow-hidden">
-      <div className="border-b p-4"><SectionHead icon={Activity} title="Authoritative channels" detail="Definitions and access policy are owned by License Manager. Dev Panel only consumes enabled channels when preparing releases."/></div>
-      <div>{rows.map((row:any)=><div key={row.channel} className="grid gap-3 border-b p-4 last:border-b-0 md:grid-cols-[1fr_auto] md:items-center"><div><div className="flex items-center gap-2"><p className="text-sm font-semibold">{row.label||row.channel}</p><StatusPill text={row.enabled===false?"disabled":"enabled"}/><StatusPill text={row.access_mode==="open"?"open":"controlled"}/></div><p className="mt-1 text-[10px] text-muted-foreground">{row.channel} · {row.customer_visible===false?"internal":"customer visible"}</p><p className="mt-2 text-xs leading-5 text-muted-foreground">{row.description||"No description."}</p></div><div className="text-right text-[10px] text-muted-foreground"><p>{row.access_request_enabled?"Requests enabled":"Requests disabled"}</p><p>{row.self_join_enabled||row.access_mode==="open"?"Self-join enabled":"Self-join disabled"}</p></div></div>)}{!loading&&!rows.length&&<div className="p-8 text-center text-xs text-muted-foreground">No channels reported by License Manager.</div>}</div>
+      <div className="border-b p-4"><SectionHead icon={Activity} title="Authoritative channels" detail="Definitions and release state are read from License Manager; source refs follow the active mode."/></div>
+      <div>{rows.map((row:any)=><div key={row.channel} className="grid gap-3 border-b p-4 last:border-b-0 md:grid-cols-[1fr_auto] md:items-center">
+        <div><div className="flex items-center gap-2"><p className="text-sm font-semibold">{row.label||row.channel}</p><StatusPill text={row.enabled===false?"disabled":"enabled"}/><StatusPill text={row.access_mode==="open"?"open":"controlled"}/></div>
+          <p className="mt-1 text-[10px] text-muted-foreground">{row.channel} · {row.customer_visible===false?"internal":"customer visible"}</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">{row.description||"No description."}</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">{(state.freshness||[]).filter((item:any)=>item.channel===row.channel).map((item:any)=><div key={item.type} className="rounded-lg border px-3 py-2 text-xs">
+            <div className="flex justify-between gap-2"><b>{item.type==="base"?"Base":"Update"}</b><StatusPill text={item.status==="source-ahead"?"Changes available":item.status==="current"?"Current":item.status==="no-published-release"?"No published release":"Not verified"}/></div>
+            <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{item.repo} · {item.ref}</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">Source {item.head?.slice(0,10)||"—"} · Published {item.publishedSha?.slice(0,10)||"—"}{item.version?" · v"+item.version:""}</p>
+          </div>)}</div>
+        </div>
+        <div className="text-right text-[10px] text-muted-foreground"><p>{row.access_request_enabled?"Requests enabled":"Requests disabled"}</p><p>{row.self_join_enabled||row.access_mode==="open"?"Self-join enabled":"Self-join disabled"}</p></div>
+      </div>)}{!loading&&!rows.length&&<div className="p-8 text-center text-xs text-muted-foreground">No channels reported by License Manager.</div>}</div>
     </section>
-    <section className="release-surface p-4"><SectionHead icon={ShieldCheck} title="Authority boundary" detail="Use License Manager for channel definitions and technical entitlement policy. Use Billing Store for customer join, request, approval, grant and revoke workflows."/></section>
+    <section className="release-surface p-4"><SectionHead icon={ShieldCheck} title="Authority boundary" detail="License Manager owns channel and release authority; Dev Panel displays read-only source freshness."/></section>
   </section>;
 }
-
 
 function CustomerPortalPage({releases,channels,session}:any) {
   const [state,setState]=useState<any>({releases,published:releases.filter((r:any)=>r.status==="published"),channels:[],portalUrl:""});
