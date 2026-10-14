@@ -46,6 +46,7 @@ export function VaultProviderRecovery({session,records,onPersist}:{
     "GitHub-main":true,"GitHub-fallback":true,"Vercel-main":true,"Vercel-fallback":true
   });
   const [running,setRunning]=useState(false);
+  const [namesOnly,setNamesOnly]=useState(true);
   const [progress,setProgress]=useState<State|null>(null);
   const [showCredentials,setShowCredentials]=useState(false);
   function credentials(source:Source){
@@ -130,7 +131,7 @@ export function VaultProviderRecovery({session,records,onPersist}:{
                   const result=await inspectVaultGithubActions({data:{token:session.token,githubToken:token,account:mode,repo,scope,kind}});
                   for(const item of result.items){
                     if(!validName(item.name)||reservedConnection(item.name))continue;
-                    const visible=kind==="variable"?(item.value??""):"";
+                    const visible=!namesOnly&&kind==="variable"?(item.value??""):"";
                     add({id:crypto.randomUUID(),systems:[systemForProject(repo)],otherSystem:"",
                       service:"GitHub",customService:"",keyName:item.name,secret:visible,
                       purpose:kind==="secret"?"GitHub Actions secret · value unavailable":"GitHub Actions variable",
@@ -169,7 +170,7 @@ export function VaultProviderRecovery({session,records,onPersist}:{
               for(const item of res.envs){
                 if(!validName(item.key)||reservedConnection(item.key))continue;
                 let value="";
-                if(item.visibility!=="secret"&&!["sensitive","secret"].includes(item.type)){
+                if(!namesOnly&&item.visibility!=="secret"&&!["sensitive","secret"].includes(item.type)){
                   try{
                     const found=await importVaultVercelConfig({data:{...args,envId:item.id,expectedUpdatedAt:item.updatedAt}});
                     value=found.value;
@@ -201,6 +202,7 @@ export function VaultProviderRecovery({session,records,onPersist}:{
       <h3 className="text-sm font-semibold">Pull all 4 provider accounts into Vault</h3>
       <p className="mt-1 text-xs text-muted-foreground">Scan approved OrbitFS repositories and all six Main/Fallback Vercel projects. GitHub secrets and Vercel Sensitive values come back as names only. Readable GitHub variables and permitted Vercel Config values can be restored. Existing Vault values are preserved. Nothing is sent, overwritten or deleted at either provider.</p>
     </div>
+    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={namesOnly} disabled={running} onChange={e=>setNamesOnly(e.target.checked)}/> Import key names only (blank values for new entries; never replace saved Vault values)</label>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {SOURCES.map(source=>{
         const id=source.provider+"-"+source.mode;
