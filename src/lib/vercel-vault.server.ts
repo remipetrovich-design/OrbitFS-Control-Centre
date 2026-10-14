@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireVaultUser } from "@/lib/vault.server";
 import { assertReviewedProductionWrite, planProductionKey, type VercelEnvMeta } from "@/lib/vercel-sync-policy";
+import { emitDiagnostic } from "@/lib/incendiary-diagnostic";
 
 type ConnectionInput = { token: string; vercelToken: string; teamId: string };
 type ProjectInput = ConnectionInput & { projectId: string };
@@ -20,6 +21,11 @@ function validateProject(projectId: string) {
   if (!/^prj_[A-Za-z0-9]{8,64}$/.test(String(projectId || ""))) throw new Error("Choose a Vercel project from the list.");
 }
 async function vercelApi<T>(path: string, vercelToken: string, options: RequestInit = {}): Promise<T> {
+  const start = Date.now();
+  const method = (options.method || "GET").toUpperCase();
+  const request_id = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+  let status = 0;
+  let error: string | null = null;
   let response: Response;
   try {
     response = await fetch("https://api.vercel.com" + path, {
@@ -28,15 +34,53 @@ async function vercelApi<T>(path: string, vercelToken: string, options: RequestI
       signal: AbortSignal.timeout(12000),
       headers: { Authorization: "Bearer " + vercelToken, "Content-Type": "application/json" },
     });
-  } catch {
+    status = response.status;
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+    emitDiagnostic({
+      direction: "egress",
+      source_system: "dev_panel",
+      target: "vercel",
+      account_mode: "fallback",
+      method,
+      endpoint: path,
+      status: 0,
+      request_id,
+      latency_ms: Date.now() - start,
+      error,
+    });
     throw new Error("Vercel request failed or timed out. No success is assumed; refresh and compare again.");
   }
   // Do not print Vercel error bodies: provider messages can contain sensitive values.
   if (!response.ok) {
+    emitDiagnostic({
+      direction: "egress",
+      source_system: "dev_panel",
+      target: "vercel",
+      account_mode: "fallback",
+      method,
+      endpoint: path,
+      status,
+      request_id,
+      latency_ms: Date.now() - start,
+      error: "HTTP " + status,
+    });
     if (response.status === 401 || response.status === 403) throw new Error("Vercel rejected this token or team permission (" + response.status + ").");
     if (response.status === 429) throw new Error("Vercel rate limit reached. Try again later.");
     throw new Error("Vercel API rejected the request (HTTP " + response.status + ").");
   }
+  emitDiagnostic({
+    direction: "egress",
+    source_system: "dev_panel",
+    target: "vercel",
+    account_mode: "fallback",
+    method,
+    endpoint: path,
+    status,
+    request_id,
+    latency_ms: Date.now() - start,
+    error: null,
+  });
   try { return await response.json() as T; }
   catch { throw new Error("Vercel returned an unreadable response. Refresh before trying again."); }
 }
