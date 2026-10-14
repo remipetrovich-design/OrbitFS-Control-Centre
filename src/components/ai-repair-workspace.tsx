@@ -161,7 +161,7 @@ export function AiRepairWorkspace({session}:{session:any}){
    }catch(e:any){if(!cancelled)setRepairProgressError(e?.message||"Worker status unavailable")}
   };
   void check();
-  const timer=window.setInterval(()=>void check(),10000);
+  const timer=window.setInterval(()=>void check(),60000);
   return()=>{cancelled=true;window.clearInterval(timer)};
  },[repairTracking,token]);
  const total=rows.length;
