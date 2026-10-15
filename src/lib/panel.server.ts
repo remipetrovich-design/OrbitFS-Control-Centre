@@ -2123,7 +2123,7 @@ export const runRepositorySync=createServerFn({method:"POST"}).handler(async({da
  }
  return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:(operation==="preview"?"Preview queued (no pushes): ":"Apply queued: ")+cfg.sourceOwner+" → "+cfg.targetOwner+"."};
 });
-type OperationsSystem="baseSource"|"engineSource"|"licenseManager"|"billingStore";
+type OperationsSystem="baseSource"|"engineSource"|"licenseManager"|"billingStore"|"devPanel";
 
 async function operationsRepos(){
  const profile=await activeGithubProfile();
@@ -2132,6 +2132,7 @@ async function operationsRepos(){
   engineSource:{repo:profile.engine.repo,branch:profile.engine.releaseRef,label:"V1 Vercel Engine",ci:"ci.yml",deploy:"publish-engine-release.yml",quickDeploy:"publish-engine-release.yml"},
   licenseManager:{repo:profile.licenseManager.repo,branch:profile.licenseManager.branch,label:"Custom License Manager",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW},
   billingStore:{repo:profile.billingStore.repo,branch:profile.billingStore.branch,label:"V2 Billing Store",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:BILLING_STORE_QUICK_DEPLOY_WORKFLOW},
+  devPanel:{repo:profile.devPanel.repo,branch:profile.devPanel.branch,label:profile.name==="primary"?"Dev Panel":"OrbitFS Control Centre",ci:"dev-panel-full-scan.yml",deploy:"deploy-dev-panel.yml",quickDeploy:"quick-deploy-dev-panel.yml"},
  } as const;
 }
 
@@ -2266,7 +2267,7 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
  requireOperationsUser(data.token);
  const profile=localGithubProfileName();
  if(!data.force&&operationsStateCache&&operationsStateCache.profile===profile&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
- const keys:OperationsSystem[]=["licenseManager","billingStore"];
+ const keys:OperationsSystem[]=["licenseManager","billingStore","devPanel"];
  try{
   const configs=await operationsRepos();
   const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key],Boolean(data.force),false)] as const));
