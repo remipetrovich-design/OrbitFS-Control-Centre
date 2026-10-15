@@ -83,11 +83,17 @@ export async function activeGithubProfile():Promise<GithubProfile>{
  await requireLocalGithubProfileActive();
  return LOCAL_PROFILE;
 }
+export function githubTokenForProfile(profile:GithubProfileName){
+ const preferred=profile==="primary"
+  ? ["MAIN_GITHUB_TOKEN","MAIN_GITHUB_RELEASE_TOKEN","ORBITFS_PRIMARY_GITHUB_TOKEN","ORBITFS_RELEASE_DISPATCH_TOKEN"]
+  : ["FALLBACK_GITHUB_TOKEN","ORBITFS_FALLBACK_GITHUB_TOKEN","FALLBACK_GITHUB_RELEASE_TOKEN"];
+ const value=preferred.map(name=>String(process.env[name]||"").trim()).find(Boolean)||"";
+ if(!value)throw new Error("Missing GitHub credential for "+profile+" account. Configure "+preferred[0]+".");
+ return value;
+}
 export async function githubToken(){
  await requireLocalGithubProfileActive();
- const value=String(process.env[LOCAL_PROFILE.tokenEnv]||"").trim();
- if(!value)throw new Error("Missing server environment variable: "+LOCAL_PROFILE.tokenEnv+" for local "+LOCAL_PROFILE.name+" GitHub system");
- return value;
+ return githubTokenForProfile(LOCAL_PROFILE.name);
 }
 export async function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:await activeGithubProfileName(),local:LOCAL_PROFILE.name};}
 export function githubProfileDefinitions(){return {primary:PRIMARY,fallback:FALLBACK};}
