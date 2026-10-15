@@ -1,0 +1,10 @@
+name: Dev Panel Quick Deploy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  quick-deploy:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy-dev-panel.yml
+    secrets: inherit
