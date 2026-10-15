@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
-import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
+import {activeGithubProfile,githubProfileDefinitions,githubToken,githubTokenForProfile,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
 import {emitDiagnostic} from "@/lib/incendiary-diagnostic";
 import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
 import {operationsWorkflowRunPaths} from "@/lib/operations-workflow-runs.mjs";
@@ -2068,7 +2068,7 @@ async function repositorySyncConfig(){
 }
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
- const token=required(cfg.side==="primary"?(process.env.MAIN_GITHUB_RELEASE_TOKEN?"MAIN_GITHUB_RELEASE_TOKEN":process.env.MAIN_GITHUB_TOKEN?"MAIN_GITHUB_TOKEN":"ORBITFS_RELEASE_DISPATCH_TOKEN"):(process.env.FALLBACK_GITHUB_RELEASE_TOKEN?"FALLBACK_GITHUB_RELEASE_TOKEN":process.env.FALLBACK_GITHUB_TOKEN?"FALLBACK_GITHUB_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN"));
+ const token=githubTokenForProfile(cfg.side);
  try{
   return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
  }catch(error:any){
