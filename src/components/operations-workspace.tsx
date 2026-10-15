@@ -5,6 +5,7 @@ import {getOperationsState,getOperationsRunDetail,getOperationsScan,runOperation
 const SYSTEMS=[
  {key:"licenseManager",label:"Custom License Manager"},
  {key:"billingStore",label:"V2 Billing Store"},
+ {key:"devPanel",label:"Dev Panel / OrbitFS Control Centre"},
 ] as const;
 
 function time(v?:string|null){return v?new Date(v).toLocaleString():"—"}
@@ -21,7 +22,7 @@ export function OperationsWorkspace({session}:{session:any}){
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
  const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
- const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:false,billingStore:false});
+ const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:false,billingStore:false,devPanel:false});
  const [consoleBusy,setConsoleBusy]=useState<Record<string,boolean>>({});
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
 
@@ -120,7 +121,7 @@ export function OperationsWorkspace({session}:{session:any}){
    <div>
     <p className="orbit-eyebrow">ORBITFS / PRODUCTION OPERATIONS</p>
     <h1>Operations</h1>
-    <p>Manual production deployment, live GitHub Actions output and failure diagnostics for License Manager and Billing Store.</p>
+    <p>Manual production deployment, live GitHub Actions output and failure diagnostics for License Manager, Billing Store and the active Dev Panel.</p>
    </div>
    <div className="flex flex-wrap items-center gap-2">
     <span className="orbit-status-chip"><span className={`orbit-dot ${live?"orbit-dot-good":""}`}/>{live?"LIVE MONITORING":"STATUS MONITOR"}</span>
