@@ -30,8 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SOURCE_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && secrets.ORBITFS_RELEASE_DISPATCH_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN }}
-      TARGET_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && secrets.ORBITFS_FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+      SOURCE_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && (secrets.MAIN_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN) || (secrets.FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN) }}
+      TARGET_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && (secrets.FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN) || (secrets.MAIN_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN) }}
     steps:
       - name: Verify direction and credentials
         shell: bash
