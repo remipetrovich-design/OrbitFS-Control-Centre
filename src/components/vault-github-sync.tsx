@@ -15,7 +15,13 @@ const TOKEN_KEYS:Record<GithubAccount,string>={main:"GITHUB_TOKEN_MAIN",fallback
 function connectionRow(records:VaultRecord[],account:GithubAccount){
   return bestVaultConnection(records,TOKEN_KEYS[account]);
 }
-function suggestedDestination(row:VaultRecord,_repo:Repository|null){return row.keyName;}
+function suggestedDestination(row:VaultRecord,_repo:Repository|null){
+  // GitHub reserves GITHUB_* and RUNNER_* for its own Actions runtime.
+  // Keep the original Vault entry name; suggest a valid destination only.
+  if(/^GITHUB_/i.test(row.keyName))return "ORBITFS_"+row.keyName.slice(7);
+  if(/^RUNNER_/i.test(row.keyName))return "ORBITFS_"+row.keyName;
+  return row.keyName;
+}
 
 export function VaultGithubSync({session,records,onPersist}:{
   session:any;records:VaultRecord[];onPersist:(records:VaultRecord[])=>Promise<void>;

@@ -1,17 +1,14 @@
 import {createServerFn} from "@tanstack/react-start";
 import {requireOwner} from "@/lib/panel.server";
-import {activeGithubProfileName,githubProfileDefinitions,githubTokenForProfile} from "@/lib/github-profile";
+import {activeGithubProfileName,githubProfileDefinitions,githubToken} from "@/lib/github-profile";
 
 const timeout=()=>AbortSignal.timeout(12000);
 function source(kind:"base"|"engine",profile:"primary"|"fallback"){
  const def=githubProfileDefinitions()[profile];
  return kind==="base"?def.base.repo:def.engine.repo;
 }
-function token(profile:"primary"|"fallback"){
- return githubTokenForProfile(profile);
-}
 async function github(repo:string,path:string,profile:"primary"|"fallback",accept="application/vnd.github+json"){
- const response=await fetch("https://api.github.com/repos/"+repo+path,{headers:{Authorization:"Bearer "+token(profile),Accept:accept,"X-GitHub-Api-Version":"2022-11-28"},cache:"no-store",signal:timeout()});
+ const response=await fetch("https://api.github.com/repos/"+repo+path,{headers:{Authorization:"Bearer "+await githubToken(repo),Accept:accept,"X-GitHub-Api-Version":"2022-11-28"},cache:"no-store",signal:timeout()});
  if(!response.ok)throw Error("GitHub "+repo+" returned HTTP "+response.status);
  return response;
 }
@@ -250,7 +247,7 @@ export const getReleaseFixPreview=createServerFn({method:"POST"}).handler(async(
 type RepairSettings={enabled:boolean;auto_diagnose:boolean;enable_base:boolean;enable_engine:boolean;enable_release_worker:boolean;enable_sql_diagnosis:boolean;lookback_hours:number;daily_ai_limit:number;model:string;show_github_failures:boolean;auto_archive_days:number;incident_page_size:number};
 const DEFAULT_REPAIR_SETTINGS:RepairSettings={enabled:false,auto_diagnose:false,enable_base:true,enable_engine:true,enable_release_worker:false,enable_sql_diagnosis:false,lookback_hours:6,daily_ai_limit:1,model:"openrouter/free",show_github_failures:true,auto_archive_days:0,incident_page_size:100};
 const REPAIR_SETTINGS_FIELDS=["enabled","auto_diagnose","enable_base","enable_engine","enable_release_worker","enable_sql_diagnosis","show_github_failures"] as const;
-function workerGithubToken(){return String(process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();}
+function workerGithubToken(){return String(process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN||process.env.AI_REPAIR_WORKER_GITHUB_TOKEN||"").trim();}
 function repairDbKey(){return String(process.env.REPAIR_SUPABASE_SERVICE_ROLE_KEY||"").trim();}
 async function repairDbRead(path:string,options?:{method:"GET"|"POST";body?:object}){
  const key=repairDbKey();

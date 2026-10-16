@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {activeGithubProfile,githubProfileDefinitions,githubToken,githubTokenForProfile,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
-import {emitDiagnostic} from "@/lib/incendiary-diagnostic";
 import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
 import {operationsWorkflowRunPaths} from "@/lib/operations-workflow-runs.mjs";
 import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
@@ -1712,16 +1711,12 @@ async function github(path:string,init:RequestInit={}){
  }
  if(key&&githubInFlight.has(key))return githubInFlight.get(key)!;
  const request=(async()=>{
-  const start=Date.now();
-  const request_id=crypto.randomUUID?.()||Math.random().toString(36).slice(2);
   try{
-   const value=await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+await githubToken(),"x-github-api-version":"2022-11-28",...(init.headers||{})}});
-   emitDiagnostic({direction:"egress",source_system:"dev_panel",target:"github",account_mode:localGithubProfileName()==="fallback"?"fallback":"main",method,endpoint:path,status:200,request_id,latency_ms:Date.now()-start,error:null});
+   const value=await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+await githubToken(/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]),"x-github-api-version":"2022-11-28",...(init.headers||{})}});
    if(key)githubReadCache.set(key,{value,expires:Date.now()+120_000,staleUntil:Date.now()+30*60*1000});
    return value;
   }catch(error:any){
    const message=String(error?.message||error);
-   emitDiagnostic({direction:"egress",source_system:"dev_panel",target:"github",account_mode:localGithubProfileName()==="fallback"?"fallback":"main",method,endpoint:path,status:0,request_id,latency_ms:Date.now()-start,error:message});
    if(/rate limit|secondary rate|abuse detection|HTTP 429|API rate/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+5*60_000);
    if(cached&&cached.staleUntil>Date.now())return cached.value;
    if(/bad credentials/i.test(message))throw new Error("GitHub credential rejected (401). Check the selected source profile's GitHub token and repository permissions.");
@@ -1733,7 +1728,13 @@ async function github(path:string,init:RequestInit={}){
 }
 async function licenseMaster(path:string,init:RequestInit={}){
  const base=await configuredMasterUrl();
- return requestJson(`${base}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})}});
+ try{
+  return await requestJson(`${base}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN").trim()}`,...(init.headers||{})}});
+ }catch(error:any){
+  const message=String(error?.message||error);
+  if(/bad credentials|unauthorized|\b401\b/i.test(message))throw new Error("MAIN License Manager authorization failed for "+path.split("?")[0]+" at "+new URL(base).hostname+". Check the active managed API key and required release scope; no GitHub token is used for this request.");
+  throw error;
+ }
 }
 
 async function billingStoreReset(input:{releaseIds:string[];version:string;releaseType:"base"|"update";channel:string}){
@@ -1763,7 +1764,7 @@ const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] 
 const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
 
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
- const token=String(process.env.MAIN_MASTER_DATABASE_GITHUB_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
+ const token=String(process.env.MAIN_MASTER_DATABASE_GITHUB_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.MAIN_GITHUB_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
  if(!token)throw new Error("Master Database GitHub control token is not configured.");
  return requestJson("https://api.github.com"+path,{
   ...init,
@@ -2068,27 +2069,36 @@ async function repositorySyncConfig(){
 }
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
- const token=githubTokenForProfile(cfg.side);
+ const token=await githubToken(cfg.controlRepo);
  try{
   return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
  }catch(error:any){
-  if(/bad credentials/i.test(String(error?.message||error)))throw new Error("Fallback GitHub mirror credential rejected (401). Update ORBITFS_FALLBACK_GITHUB_TOKEN before using mirror sync.");
+  if(/bad credentials/i.test(String(error?.message||error)))throw new Error("GitHub sync credential rejected (401) for "+cfg.side+". Verify the active account credential before retrying.");
   throw error;
  }
 }
+function repositorySyncIsPreview(run:any):boolean{
+ // GitHub run-list and single-run APIs can omit workflow_dispatch inputs.
+ // New manual runs label the operation explicitly; never trust an unlabeled
+ // success as authorization to apply repository changes.
+ const name=String(run?.display_title||run?.name||"");
+ if(/^OrbitFS sync PREVIEW(?: · |$)/.test(name))return true;
+ if(/^OrbitFS sync APPLY(?: · |$)/.test(name))return false;
+ return run?.inputs?.preview===true||run?.inputs?.preview==="true";
+}
 function cleanRepositorySyncRun(run:any){
- return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,preview:run?.inputs?.preview==="true"}:null;
+ return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,display_title:run.display_title,preview:repositorySyncIsPreview(run)}:null;
 }
 export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
  const cfg=await repositorySyncConfig();
- const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+ const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
  const runs=Array.isArray(result?.workflow_runs)?result.workflow_runs:[];
  // GitHub's list response may omit workflow_dispatch inputs. Hydrate the
  // latest run through the single-run endpoint before using it for approval.
  const newest=(result?.workflow_runs||[]).slice().sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
  if(newest?.id) {
-  const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+newest.id).catch(()=>null);
+  const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+newest.id);
   if(details?.inputs)newest.inputs=details.inputs;
  }
  const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
@@ -2100,25 +2110,25 @@ export const runRepositorySync=createServerFn({method:"POST"}).handler(async({da
  if(!repositorySyncEnabled())throw new Error("Repository synchronization is disabled. Explicitly enable ORBITFS_REPOSITORY_SYNC_ENABLED=true before a manual sync.");
  const operation=data.operation==="apply"?"apply":"preview";
  const cfg=await repositorySyncConfig();
- const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+ const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
  const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
  if(active)return {ok:true,alreadyRunning:true,run:cleanRepositorySyncRun(active),message:"Repository sync is already running."};
  if(operation==="apply"){
   const runs=(before?.workflow_runs||[]).filter((run:any)=>String(run?.status||"")==="completed").sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime());
   const latestRun=runs[0];
   if(latestRun?.id){
-   const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+latestRun.id).catch(()=>null);
+   const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+latestRun.id);
    if(details?.inputs)latestRun.inputs=details.inputs;
   }
-  const preview=runs.find((run:any)=>run?.conclusion==="success"&&String(run?.inputs?.preview)==="true");
-  if(!preview||preview.id!==runs[0]?.id)throw new Error("A successful preview must be the latest completed synchronization run before Apply.");
+  const preview=latestRun?.conclusion==="success"&&repositorySyncIsPreview(latestRun);
+  if(!preview)throw new Error("The latest completed sync run must be a successful, verified preview before Apply.");
  }
  const startedAt=Date.now();
  await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main",inputs:{confirmation:"SYNC",preview:operation==="preview"?"true":"false"}})});
  let run:any=null;
  for(let attempt=0;attempt<8&&!run;attempt++){
   await new Promise(resolve=>setTimeout(resolve,700));
-  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
   run=(result?.workflow_runs||[]).filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=startedAt-5000).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  }
  return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:(operation==="preview"?"Preview queued (no pushes): ":"Apply queued: ")+cfg.sourceOwner+" → "+cfg.targetOwner+"."};
@@ -2154,7 +2164,7 @@ const operationsGithubTextCache=new Map<string,{value:string;expires:number;stal
 async function operationsGithubText(path:string){
  const cached=operationsGithubTextCache.get(path);
  if(cached&&cached.expires>Date.now())return cached.value;
- const token=await githubToken();
+ const token=await githubToken(/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]);
  const response=await fetch("https://api.github.com"+path,{headers:{accept:"application/vnd.github+json",authorization:"Bearer "+token,"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28"},cache:"no-store",redirect:"follow"});
  const text=await response.text();
  if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
@@ -2319,12 +2329,29 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
   if(deployedRun?.head_sha===mainSha)throw new Error("No deployment needed. The latest main commit is already deployed to production.");
   if(!latestScan||latestScan.status!=="completed"||latestScan.conclusion!=="success")throw new Error("Deploy is blocked until the exact current main commit has a successful Full Scan. A scan for an older commit cannot be reused.");
  }
+ // Quick Deploy collects the entire outstanding commit range, not only HEAD.
+ // This is a read-only comparison; it does not dispatch a scan.
+ let quickUpdates:{baselineSha:string|null;currentSha:string;commits:Array<{sha:string;message:string}>}|null=null;
+ if(action==="override-deploy"&&data.system==="devPanel"){
+  const [ref,normal,quick]=await Promise.all([
+   github("/repos/"+cfg.repo+"/git/ref/heads/main"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch=main&status=success&per_page=1")
+  ]);
+  const currentSha=String(ref?.object?.sha||"");
+  if(!currentSha)throw new Error("Cannot resolve the latest main commit for Quick Deploy.");
+  const latest=[normal?.workflow_runs?.[0],quick?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+  const baselineSha=String(latest?.head_sha||"")||null;
+  if(baselineSha===currentSha)throw new Error("No new commits to Quick Deploy: current main is already marked deployed.");
+  const rows=baselineSha?await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha):[];
+  quickUpdates={baselineSha,currentSha,commits:rows.map((c:any)=>({sha:String(c.sha||""),message:String(c.commit?.message||"").split("\n")[0]}))};
+ }
  const startedAt=Date.now();
  await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
  operationsStateCache=null;
  operationsScanCache.delete(localGithubProfileName()+":"+data.system);
  const run=await findOperationsRun(cfg,workflow,startedAt);
- return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
+ return {ok:true,run,action,system:data.system,quickUpdates,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?(quickUpdates?(quickUpdates.baselineSha?quickUpdates.commits.length+" outstanding commits collected; ":"initial complete main source selected; "):"")+"Quick Deploy":"production deployment")+" queued."};
 });
 
 async function operationsFullTree(repo:string,treeSha:string){

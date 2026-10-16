@@ -17,6 +17,7 @@ const VAULT_DESTINATIONS = [
   {mode:"main",system:"License",service:"GitHub",value:"lucaskerim123/Custom-licence-manager"},
   {mode:"main",system:"Billing",service:"GitHub",value:"lucaskerim123/V2_Billing_Store"},
   {mode:"main",system:"Dev",service:"GitHub",value:"lucaskerim123/Dev-panel"},
+  {mode:"main",system:"Database",service:"GitHub",value:"lucaskerim123/Master-Database-System"},
   {mode:"fallback",system:"License",service:"GitHub",value:"remipetrovich-design/OrbitFS-License-Administration"},
   {mode:"fallback",system:"Billing",service:"GitHub",value:"remipetrovich-design/OrbitFS-Billing-Shopfront"},
   {mode:"fallback",system:"Dev",service:"GitHub",value:"remipetrovich-design/OrbitFS-Control-Centre"},
@@ -28,8 +29,6 @@ const VAULT_DESTINATIONS = [
   {mode:"fallback",system:"Billing",service:"Vercel",value:"orbitfs-billing-fallback"},
   {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
 ] as const;
-const destinationsFor = (_system:string,service:string,modes:VaultMode[]) =>
-  VAULT_DESTINATIONS.filter(item=>item.service===service&&modes.includes(item.mode));
 
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
 const SERVICES=[...VAULT_SERVICES];
@@ -68,6 +67,8 @@ export function VaultWorkspace({session}:{session:any}){
   const [browseMode,setBrowseMode]=useState<Record<"Vercel"|"GitHub",VaultMode>>({Vercel:"main",GitHub:"main"});
   const [browseTab,setBrowseTab]=useState<Record<"Vercel"|"GitHub",VaultTab>>({Vercel:"License",GitHub:"License"});
   const [syncProvider,setSyncProvider]=useState<"Vercel"|"GitHub">("Vercel");
+  const [exportMode,setExportMode]=useState<VaultMode>("main");
+  const [exportSystem,setExportSystem]=useState<VaultTab>("Dev");
   const [providerSyncOpen,setProviderSyncOpen]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -212,6 +213,63 @@ export function VaultWorkspace({session}:{session:any}){
     link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
     setNotice("Exported "+records.length+" entries ("+populated+" saved values) as UNENCRYPTED JSON. The existing JSON import accepts this format. Protect the file.");
+  }
+
+  function downloadSystemModeJson(mode:VaultMode,tab:VaultTab){
+    setError("");setNotice("");
+    const selected=records.filter(row=>vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab));
+    if(!selected.length){setError("No saved keys for "+mode+" / "+tab+".");return;}
+    const populated=selected.filter(row=>Boolean(row.secret)).length;
+    if(!window.confirm("Download ONLY "+selected.length+" "+mode+" / "+tab+" keys across all providers, including "+populated+" plaintext secret values? The JSON is NOT encrypted."))return;
+    const payload={
+      format:"orbitfs-vault-import-v2",
+      exportedAt:new Date().toISOString(),
+      warning:"UNENCRYPTED FILE: contains saved Vault secret values. Protect this file.",
+      entries:selected.map(row=>({
+        service:row.service,system:row.systems[0]||"Other",
+        keyName:row.keyName,keyValue:row.secret||"",purpose:row.purpose||"",
+        usedIn:row.usedIn||[],destinationSystem:row.destinationSystem||"",
+        destinationSystems:row.destinationSystems?.length?row.destinationSystems:vaultDestinations(row),
+        valueSource:row.valueSource||"Vault saved value"
+      }))
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)+"\\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="orbitfs-vault-"+mode+"-"+tab.toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setNotice("Exported "+selected.length+" "+mode+" / "+tab+" keys ("+populated+" saved secrets) across providers. JSON is unencrypted; no other system selected.");
+  }
+
+  function downloadSelectedSystemJson(provider:"Vercel"|"GitHub",mode:VaultMode,tab:VaultTab){
+    setError("");setNotice("");
+    // Export the selected provider + account + system, independently of the search input.
+    const selected=records.filter(row=>row.service===provider&&vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab));
+    if(!selected.length){setError("No saved keys for "+mode+" / "+tab+" / "+provider+".");return;}
+    const populated=selected.filter(row=>Boolean(row.secret)).length;
+    if(!window.confirm("Download ONLY "+selected.length+" "+mode+" / "+tab+" / "+provider+" keys, including "+populated+" plaintext secret values? This JSON is NOT encrypted. Keep it secure."))return;
+    const payload={
+      format:"orbitfs-vault-import-v2",
+      exportedAt:new Date().toISOString(),
+      warning:"UNENCRYPTED FILE: contains saved Vault secret values. Protect this file.",
+      entries:selected.map(row=>({
+        service:row.service,system:row.systems[0]||"Other",keyName:row.keyName,
+        keyValue:row.secret||"",purpose:row.purpose||"",usedIn:row.usedIn||[],
+        destinationSystem:row.destinationSystem||"",
+        destinationSystems:row.destinationSystems?.length?row.destinationSystems:vaultDestinations(row),
+        valueSource:row.valueSource||"Vault saved value"
+      }))
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)+"\\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="orbitfs-vault-"+mode+"-"+tab.toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+provider.toLowerCase()+"-"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setNotice("Exported only "+selected.length+" "+mode+" / "+tab+" / "+provider+" entries ("+populated+" values) as UNENCRYPTED JSON. Other systems were not included.");
   }
 
   async function restoreConnectionsFromBackup(event:React.ChangeEvent<HTMLInputElement>){
@@ -371,6 +429,7 @@ export function VaultWorkspace({session}:{session:any}){
 
   return <section className="space-y-4">
     <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" type="button" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-3" aria-label="Sync Vault to providers">
       <h2 className="text-sm font-semibold">Sync from Vault → GitHub / Vercel</h2>
       <p className="text-xs text-muted-foreground">Your saved Vault entries are the desired values for these destinations. Sync compares the exact assigned target, then lets you review and confirm creating or overriding values. Nothing deletes remote secrets or variables.</p>
@@ -391,6 +450,20 @@ export function VaultWorkspace({session}:{session:any}){
       <h2 className="text-base font-semibold">Vault · organised by system</h2>
       <p className="text-xs text-muted-foreground">Service is the provider. System is the OrbitFS product. Every key is tied to an explicit account mode and exact destination; prefixes are never guessed during sync.</p>
       <p className="text-xs text-muted-foreground">{records.length} saved entries · {needingReview.length} need destination review. Verified Production names below come from real Main Vercel settings, not invented runtime requirements.</p>
+      <div className="flex flex-wrap items-end gap-2 rounded border p-3" aria-label="Download keys for one system and mode">
+        <label className="text-xs font-medium">Account mode
+          <select className="control mt-1" value={exportMode} onChange={e=>setExportMode(e.target.value as VaultMode)}>
+            <option value="main">Main</option><option value="fallback">Fallback</option>
+          </select>
+        </label>
+        <label className="text-xs font-medium">System
+          <select className="control mt-1" value={exportSystem} onChange={e=>setExportSystem(e.target.value as VaultTab)}>
+            {VAULT_TABS.map(tab=><option value={tab} key={tab}>{vaultTabLabel(tab)}</option>)}
+          </select>
+        </label>
+        <button type="button" className="button-secondary" disabled={busy||!records.some(row=>vaultMatchesMode(row,exportMode)&&vaultMatchesTab(row,exportSystem))} onClick={()=>downloadSystemModeJson(exportMode,exportSystem)}><Download size={14}/> Download selected system JSON (key names + secrets)</button>
+        <p className="w-full text-xs text-muted-foreground">Exports only the selected Main or Fallback system, including its saved GitHub, Vercel, Supabase and other provider keys. Plaintext JSON: keep secure.</p>
+      </div>
       {pendingMigration&&<div className="rounded border p-3 space-y-2">
         <strong className="text-sm">Review legacy Vault conversion</strong>
         <p className="text-xs">The existing Vault was decrypted in your browser. Only key names verified against the actual Main Production inventory were normalised. Other names and all values were retained. Your previous encrypted Vault is unchanged until you save.</p>
@@ -413,6 +486,7 @@ export function VaultWorkspace({session}:{session:any}){
           </div>
           <div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input aria-label={provider+" key search"} className="control w-full min-w-0 pl-9" placeholder="Search saved variables and destinations…" value={query} onChange={e=>setQuery(e.target.value)}/></div>
           <p className="text-xs text-muted-foreground">{current.length} entries · Tabs organise keys; they do not limit where they can be used.</p>
+          <button type="button" className="button-secondary" disabled={busy||!records.some(row=>row.service===provider&&vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab))} onClick={()=>downloadSelectedSystemJson(provider,mode,tab)}><Download size={14}/> Download {mode==="main"?"Main":"Fallback"} / {vaultTabLabel(tab)} / {provider} JSON (names + secrets)</button>
           <div className="space-y-2">
             {current.map(row=><article key={row.id} className="min-w-0 rounded-lg border p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -466,7 +540,7 @@ export function VaultWorkspace({session}:{session:any}){
           <div className="mt-2 max-h-52 space-y-2 overflow-y-auto rounded border p-3">
             {(["main","fallback"] as VaultMode[]).map(mode=><div key={mode} className="space-y-1">
               <p className="font-semibold">{mode==="main"?"Main":"Fallback"}</p>
-              {destinationsFor(draft.system,draft.service,draft.usedIn).filter(item=>item.mode===mode).map(item=><label key={item.value} className="flex min-w-0 items-start gap-2 py-1">
+              {VAULT_DESTINATIONS.filter(item=>item.service===draft.service&&item.mode===mode).map(item=><label key={item.value} className="flex min-w-0 items-start gap-2 py-1">
                 <input type="checkbox" className="mt-0.5 shrink-0" checked={draft.destinationSystems.includes(item.value)} onChange={e=>setDraft({...draft,destinationSystems:e.target.checked?[...draft.destinationSystems,item.value]:draft.destinationSystems.filter(value=>value!==item.value)})}/>
                 <span className="min-w-0 break-all">{item.value}</span>
               </label>)}
@@ -555,7 +629,6 @@ export function VaultWorkspace({session}:{session:any}){
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
     </details>
 
-    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
       <summary className="cursor-pointer text-sm font-semibold">Sync Vault → Provider · compare / review / create / override</summary>
       <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>

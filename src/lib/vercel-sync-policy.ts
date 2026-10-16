@@ -30,8 +30,10 @@ export function planProductionKey(envs: VercelEnvMeta[], key: string): Productio
   if (matches.length !== 1)
     return { action: "blocked", key, reason: "Multiple Production variables share this name." };
   const row = matches[0]!;
-  if (row.target.length !== 1 || row.target[0] !== "production" || row.gitBranch || row.customEnvironmentIds.length)
-    return { action: "blocked", key, reason: "Existing variable also targets another environment or branch. Split it in Vercel before syncing." };
+  // Editing an existing Vercel env ID updates every target assigned to that ID.
+  // Main users do not use Preview/Development, but branch/custom scopes remain blocked.
+  if (row.gitBranch || row.customEnvironmentIds.length || row.target.some(target => !["production","preview","development"].includes(target)))
+    return { action: "blocked", key, reason: "Branch-specific or custom environment variable: review it directly in Vercel." };
   if (!row.id)
     return { action: "blocked", key, reason: "Vercel did not return a variable ID." };
   return { action: "replace", key, expectedId: row.id, expectedUpdatedAt: row.updatedAt };

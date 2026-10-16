@@ -89,7 +89,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       const changes = new Map([["VERCEL_TOKEN_"+account.toUpperCase(),token],["VERCEL_TEAM_ID_"+account.toUpperCase(),team]]);
       const seen = new Set<string>();
       const next = records.map(row=>{
-        if (changes.has(row.keyName)) {
+        if (changes.has(row.keyName) && row.usedIn?.includes(account)) {
           seen.add(row.keyName);return {...row,secret:changes.get(row.keyName)!};
         }
         return row;
@@ -173,6 +173,32 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
     });
   }
 
+  async function attachMatchingSystemKeys() {
+    if(!project)return;
+    const system=systemForProject(project.name);
+    const candidates=records.filter(row=>
+      row.systems.includes(system) &&
+      row.usedIn?.includes(account) &&
+      assessVercelVaultEntry(row,project.name,account).status==="attach" &&
+      row.secret?.trim() &&
+      !/^(?:GITHUB_TOKEN|VERCEL_(?:TOKEN|TEAM_ID))_(?:MAIN|FALLBACK)$/.test(row.keyName)
+    );
+    if(!candidates.length){setNotice("No unassigned populated keys for this system and mode.");return;}
+    await run("attach-matching",async()=>{
+      let next=records;
+      let count=0;
+      for(const row of candidates){
+        if(next.some(other=>other.service==="Vercel" && other.usedIn?.includes(account) &&
+          other.keyName===row.keyName &&
+          (other.destinationSystems||[other.destinationSystem||""]).some(name=>name.toLowerCase()===project.name.toLowerCase())))continue;
+        next=attachVercelVaultEntry(next,row,project.name,account,crypto.randomUUID());
+        count++;
+      }
+      if(count)await onPersist(next);
+      setSelected([]);clearReview();
+      setNotice(count+" "+system+" keys attached to "+account+" / "+project.name+". Review each before syncing; no Vercel values were changed.");
+    });
+  }
   async function addReferenceKey(keyName:string) {
     if(!project)return;
     const destination=project.name;
@@ -309,6 +335,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
           <input className="control mt-1" type="search" placeholder="Search key name, system or purpose…" value={keyQuery}
             onChange={e=>setKeyQuery(e.target.value)} />
         </label>
+        <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void attachMatchingSystemKeys()}>Attach populated {vaultSystemLabel(systemForProject(project.name))} keys for {account}</button>
         <span className="text-xs text-muted-foreground">{entries.length} saved · {eligible.length} ready · {entries.filter(e=>e.assessment.status==="attach").length} need attaching · {entries.filter(e=>e.assessment.status==="value").length} need a real value</span>
       </div>
       <div className="max-h-[34rem] overflow-auto space-y-3">

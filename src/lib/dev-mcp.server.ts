@@ -75,7 +75,7 @@ async function github(path:string,init:RequestInit={}){
   if(cached&&cached.staleUntil>Date.now())return cached.value;
   throw new Error("GitHub API rate limit is cooling down; retry after the reset window.");
  }
- const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+await githubToken(),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
+ const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+await githubToken(/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
  const text=await response.text();let body:any=null;try{body=text?JSON.parse(text):null}catch{}
  if(!response.ok){
   if(response.status===403||response.status===429){

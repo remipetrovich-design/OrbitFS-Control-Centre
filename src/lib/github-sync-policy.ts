@@ -16,6 +16,8 @@ const CONNECTION_NAMES = /^(GITHUB_TOKEN(?:_(?:MAIN|FALLBACK))?|GH_TOKEN|VERCEL_
 export function planGithubKey(items: GithubItem[], key: string): GithubPlan {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || key.length > 100)
     return { action: "blocked", key, reason: "Invalid GitHub Actions variable/secret name." };
+  if (/^(GITHUB_|RUNNER_)/i.test(key))
+    return { action: "blocked", key, reason: "GitHub Actions reserves names beginning GITHUB_ and RUNNER_. Rename the destination Actions secret (for example, ORBITFS_ACTIONS_TOKEN); the Vault source name can remain unchanged." };
   if (CONNECTION_NAMES.test(key))
     return { action: "blocked", key, reason: "Vault connection tokens cannot be pushed into GitHub Actions." };
   if (/^(LM_)?(MASTER_API_TOKEN|DATABASE_URL|SUPABASE_SERVICE_ROLE_KEY|BOOTSTRAP_ADMIN_PASSWORD|AUTHORITY_LOCKDOWN_RECOVERY_TOKEN)$/i.test(key))

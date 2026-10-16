@@ -42,11 +42,17 @@ export const CORE_GROUPS: CoreGroup[] = [
   {title:"Shared Master Database System",purpose:"The database builder and validated packages stay in lucaskerim123/Master-Database-System in either mode",entries:[
     spec("DEV_MASTER_DATABASE_REPO","GitHub","Deployment","Both Dev Panels · central database source repository"),
     spec("DEV_MASTER_DATABASE_GITHUB_TOKEN","GitHub","Deployment","Both Dev Panels · token with access to the shared central database repository"),
+    spec("MAIN_MASTER_DATABASE_GITHUB_TOKEN","GitHub","Deployment","Both Dev Panels · canonical Main-owned Master Database account credential"),
+    spec("FALLBACK_AI_REPAIR_WORKER_GITHUB_TOKEN","GitHub","Deployment","Both Dev Panels · Fallback-owned AI Repair GitHub credential"),
     spec("DEV_MASTER_DATABASE_REF","GitHub","Deployment","Both Dev Panels · central database source branch"),
   ]},
   {title:"GitHub account access — two shared tokens",purpose:"One Main token and one Fallback token; each serves all repositories that its account token can access",entries:[
     spec("GITHUB_TOKEN_MAIN","GitHub","Deployment","Main · lucaskerim123"),
     spec("GITHUB_TOKEN_FALLBACK","GitHub","Deployment","Fallback · remipetrovich-design"),
+    spec("MAIN_GITHUB_TOKEN","GitHub","Deployment","Main account shared credential for service runtime destinations"),
+    spec("FALLBACK_GITHUB_TOKEN","GitHub","Deployment","Fallback account shared credential for service runtime destinations"),
+    spec("MAIN_GITHUB_RELEASE_TOKEN","GitHub","Deployment","Main account release and dispatch alias"),
+    spec("FALLBACK_GITHUB_RELEASE_TOKEN","GitHub","Deployment","Fallback account release and dispatch alias"),
   ]},
   {title:"Release and deployment credentials",purpose:"GitHub release integration, Vercel account access, and Billing Store automation",entries:[
     spec("DEV_ORBITFS_RELEASE_DISPATCH_TOKEN","GitHub","Deployment","Dev Panel · release dispatch"),
@@ -60,6 +66,10 @@ export const CORE_GROUPS: CoreGroup[] = [
     spec("LM_ORBITFS_FALLBACK_VERCEL_TOKEN","Vercel","Deployment","License Manager · verify Fallback Vercel projects"),
     spec("BILLING_CRON_SECRET","Billing Store","Custom","Billing Store · cron endpoint"),
     spec("DEV_APP_SESSION_SECRET","Other","Dev","Dev Panel · server session signing"),
+    spec("MAIN_LICENSE_MASTER_API_TOKEN","License Manager","API","Main scoped release registration credential — never GitHub PAT"),
+    spec("FALLBACK_LICENSE_MASTER_API_TOKEN","License Manager","API","Fallback scoped release registration credential — never GitHub PAT"),
+    spec("MAIN_LICENSE_MASTER_URL","License Manager","API","Main authority endpoint"),
+    spec("FALLBACK_LICENSE_MASTER_URL","License Manager","API","Fallback authority endpoint"),
     spec("VERCEL_TOKEN_MAIN","Vercel","Deployment","Main Vercel connection"),
     spec("VERCEL_TEAM_ID_MAIN","Vercel","Deployment","Main Vercel team"),
     spec("VERCEL_TOKEN_FALLBACK","Vercel","Deployment","Fallback Vercel connection"),

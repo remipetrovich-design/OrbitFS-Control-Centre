@@ -130,6 +130,7 @@ function Index() {
     } catch (x: any) {
       setMasterConnected(false);
       setError(x.message || "Unable to connect to License Master.");
+      if (!silent) setTab(current => current === "overview" ? "vault" : current);
     } finally {
       if (!silent) setLoading(false);
     }

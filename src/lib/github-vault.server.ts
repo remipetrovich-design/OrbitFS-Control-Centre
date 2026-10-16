@@ -1,24 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
-// A static import lets Nitro/Vercel trace and package libsodium for the server function.
-// Dynamic createRequire left it absent from deployed function bundles.
-import sodium from "libsodium-wrappers";
+// Load libsodium's CommonJS entry through Node's loader in Vercel's ESM server.
+// This avoids the CommonJS __dirname runtime failure during GitHub secret writes.
+import { createRequire } from "node:module";
+const loadModule = createRequire(import.meta.url);
 import { requireVaultUser } from "@/lib/vault.server";
 import {
   allowedVaultValue, assertReviewedGithubWrite, planGithubKey, targetPath, GITHUB_OWNERS,
   type GithubAccount, type GithubKind, type GithubScope, type GithubItem,
 } from "@/lib/github-sync-policy";
-import { emitDiagnostic } from "@/lib/incendiary-diagnostic";
 
 type Connection = { token: string; githubToken: string; account: GithubAccount };
 type Target = Connection & { repo: string; scope: GithubScope; kind: GithubKind };
 type Write = Target & { key: string; value: string; action: "create" | "replace"; expectedUpdatedAt: string | null };
 
-async function githubApi<T>(path: string, githubToken: string, init: RequestInit = {}, account: GithubAccount = "fallback"): Promise<T> {
-  const start = Date.now();
-  const method = (init.method || "GET").toUpperCase();
-  const request_id = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
-  let status = 0;
-  let error: string | null = null;
+async function githubApi<T>(path: string, githubToken: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch("https://api.github.com" + path, {
@@ -30,37 +25,11 @@ async function githubApi<T>(path: string, githubToken: string, init: RequestInit
         "Content-Type": "application/json",
       },
     });
-    status = response.status;
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-    emitDiagnostic({
-      direction: "egress",
-      source_system: "dev_panel",
-      target: "github",
-      account_mode: account === "main" ? "main" : "fallback",
-      method,
-      endpoint: path,
-      status: 0,
-      request_id,
-      latency_ms: Date.now() - start,
-      error,
-    });
+  } catch {
     throw new Error("GitHub request failed or timed out. Refresh and compare before retrying.");
   }
   // Provider error bodies may contain sensitive information; never surface or log them.
   if (!response.ok) {
-    emitDiagnostic({
-      direction: "egress",
-      source_system: "dev_panel",
-      target: "github",
-      account_mode: account === "main" ? "main" : "fallback",
-      method,
-      endpoint: path,
-      status,
-      request_id,
-      latency_ms: Date.now() - start,
-      error: "HTTP " + status,
-    });
     if (response.status === 401) throw new Error("GitHub rejected the Vault token (401).");
     if (response.status === 403) {
       const remaining=response.headers.get("x-ratelimit-remaining");
@@ -82,18 +51,6 @@ async function githubApi<T>(path: string, githubToken: string, init: RequestInit
     if (response.status === 429) throw new Error("GitHub rate limit reached.");
     throw new Error("GitHub API rejected the request (HTTP " + response.status + ").");
   }
-  emitDiagnostic({
-    direction: "egress",
-    source_system: "dev_panel",
-    target: "github",
-    account_mode: account === "main" ? "main" : "fallback",
-    method,
-    endpoint: path,
-    status,
-    request_id,
-    latency_ms: Date.now() - start,
-    error: null,
-  });
   if (response.status === 204 || response.status === 205) return {} as T;
   try { const raw = await response.text(); return raw ? JSON.parse(raw) as T : {} as T; }
   catch { throw new Error("GitHub returned an unreadable response. Refresh and compare again."); }
@@ -105,7 +62,7 @@ async function connection(input: Connection) {
     throw new Error("Select Main or Fallback GitHub.");
   if (typeof input.githubToken !== "string" || input.githubToken.length < 16 || input.githubToken.length > 2048 || /\s/.test(input.githubToken))
     throw new Error("Save a valid account-scoped GitHub token in the unlocked Vault.");
-  const account = await githubApi<{login?: string}>("/user", input.githubToken, {}, input.account);
+  const account = await githubApi<{login?: string}>("/user", input.githubToken);
   if (account.login?.toLowerCase() !== GITHUB_OWNERS[input.account].toLowerCase())
     throw new Error("GitHub token account does not match the selected Main/Fallback owner.");
   return GITHUB_OWNERS[input.account];
@@ -123,7 +80,7 @@ async function confirmRepo(input: Target, owner: string) {
   const repo = validatedRepo(input.repo, owner);
   if (input.scope !== "repository" && input.scope !== "production") throw new Error("Invalid Actions scope.");
   if (input.kind !== "secret" && input.kind !== "variable") throw new Error("Invalid Actions entry type.");
-  const info = await githubApi<{full_name?:string}>(pathForRepo(owner,repo), input.githubToken, {}, input.account);
+  const info = await githubApi<{full_name?:string}>(pathForRepo(owner,repo),input.githubToken);
   if (info.full_name?.toLowerCase() !== input.repo.toLowerCase()) throw new Error("Repository identity did not match.");
   return repo;
 }
@@ -131,9 +88,9 @@ function pathForRepo(owner:string,repo:string) {
   return "/repos/" + encodeURIComponent(owner) + "/" + encodeURIComponent(repo);
 }
 
-async function productionEnvironment(owner:string, repo:string, githubToken:string, account: GithubAccount = "fallback") {
+async function productionEnvironment(owner:string, repo:string, githubToken:string) {
   const res = await githubApi<{total_count?:number;environments?:Array<{name?:string}>}>(
-    pathForRepo(owner,repo) + "/environments?per_page=100", githubToken, {}, account
+    pathForRepo(owner,repo) + "/environments?per_page=100", githubToken
   );
   if (!Array.isArray(res.environments)) throw new Error("GitHub did not return environment metadata.");
   const matches = res.environments.filter(e=>e.name?.toLowerCase()==="production");
@@ -153,12 +110,12 @@ function normalizeRows(items: unknown, kind: GithubKind): GithubItem[] {
 }
 
 async function inventory(input: Target, owner: string, repo: string) {
-  const environment = input.scope === "production" ? await productionEnvironment(owner,repo,input.githubToken, input.account) : undefined;
+  const environment = input.scope === "production" ? await productionEnvironment(owner,repo,input.githubToken) : undefined;
   const base = targetPath(owner,repo,input.scope,input.kind,environment);
   let all: GithubItem[] = [];
   for(let page=1;page<=10;page++){
     const path = base + "?per_page=100&page=" + page;
-    const result = await githubApi<{total_count?:number;secrets?:unknown[];variables?:unknown[]}>(path,input.githubToken, {}, input.account);
+    const result = await githubApi<{total_count?:number;secrets?:unknown[];variables?:unknown[]}>(path,input.githubToken);
     const batch = normalizeRows(input.kind==="secret" ? result.secrets : result.variables,input.kind);
     all = all.concat(batch);
     if(batch.length<100) return {items:all,environment:environment||null,base};
@@ -172,7 +129,7 @@ export const listVaultGithubRepositories = createServerFn({method:"POST"}).handl
     const repositories:Array<{fullName:string;name:string;isPrivate:boolean}> = [];
     for(let page=1;page<=10;page++){
       const rows=await githubApi<Array<{full_name?:string;name?:string;private?:boolean;owner?:{login?:string}}>>(
-        "/user/repos?affiliation=owner&per_page=100&page="+page+"&sort=full_name",data.githubToken, {}, data.account
+        "/user/repos?affiliation=owner&per_page=100&page="+page+"&sort=full_name",data.githubToken
       );
       if(!Array.isArray(rows)) throw new Error("GitHub did not return a repository list.");
       for(const row of rows){
@@ -203,23 +160,24 @@ export const writeVaultGithubAction = createServerFn({method:"POST"}).handler(
     const endpoint=before.base;
     if(data.kind==="secret"){
       // GitHub accepts libsodium sealed boxes, never plaintext. Values cannot be read back.
-      const publicKey=await githubApi<{key?:string;key_id?:string}>(endpoint+"/public-key",data.githubToken, {}, data.account);
+      const publicKey=await githubApi<{key?:string;key_id?:string}>(endpoint+"/public-key",data.githubToken);
       if(!publicKey.key || !publicKey.key_id) throw new Error("GitHub did not supply an Actions secret public key.");
+      const sodium = loadModule("libsodium-wrappers");
       await sodium.ready;
       const recipient=sodium.from_base64(publicKey.key,sodium.base64_variants.ORIGINAL);
       if(recipient.length!==32) throw new Error("GitHub returned an invalid Actions secret public key.");
       const encrypted=sodium.to_base64(sodium.crypto_box_seal(sodium.from_string(data.value),recipient),sodium.base64_variants.ORIGINAL);
       await githubApi(endpoint+"/"+encodeURIComponent(data.key),data.githubToken,{
         method:"PUT",body:JSON.stringify({encrypted_value:encrypted,key_id:publicKey.key_id})
-      }, data.account);
+      });
     }else if(plan.action==="create"){
       await githubApi(endpoint,data.githubToken,{
         method:"POST",body:JSON.stringify({name:data.key,value:data.value})
-      }, data.account);
+      });
     }else{
       await githubApi(endpoint+"/"+encodeURIComponent(data.key),data.githubToken,{
         method:"PATCH",body:JSON.stringify({name:data.key,value:data.value})
-      }, data.account);
+      });
     }
     const after=await inventory(data,owner,repo);
     if(planGithubKey(after.items,data.key).action!=="replace")

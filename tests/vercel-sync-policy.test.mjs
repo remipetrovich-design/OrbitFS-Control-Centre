@@ -23,8 +23,10 @@ test("an existing key requires an exact reviewed version", () => {
     key: "LICENSE_MASTER_URL", action: "replace", expectedId: "env_123", expectedUpdatedAt: 1700000000000
   }), /changed since comparison/);
 });
-test("do not change shared Production and Preview settings", () => {
-  assert.equal(planProductionKey([row(["production", "preview"])], "LICENSE_MASTER_URL").action, "blocked");
+test("reviewed replacements support shared Production Preview and Development records", () => {
+  assert.equal(planProductionKey([row(["production", "preview"])], "LICENSE_MASTER_URL").action, "replace");
+  assert.equal(planProductionKey([row(["production", "preview", "development"])], "LICENSE_MASTER_URL").action, "replace");
+  assert.equal(planProductionKey([row(["production"], { gitBranch: "main" })], "LICENSE_MASTER_URL").action, "blocked");
   assert.equal(planProductionKey([row(["production"], { customEnvironmentIds: ["custom_1"] })], "LICENSE_MASTER_URL").action, "blocked");
 });
 test("do not export Vault connection tokens into target projects", () => {
