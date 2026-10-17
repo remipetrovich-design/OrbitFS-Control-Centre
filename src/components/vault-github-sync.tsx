@@ -46,9 +46,10 @@ export function VaultGithubSync({session,records,onPersist}:{
   const repository=repositories.find(r=>r.fullName===repoName)||null;
   const eligible=useMemo(()=>records.filter(r=>Boolean(repository) &&
     allowedForGithubRepo(r,repository!.fullName,account) &&
+    (r.githubType||"secret")===kind &&
     allowedVaultValue(r.secret) &&
     !/^(GITHUB_TOKEN_(MAIN|FALLBACK)|VERCEL_(TOKEN|TEAM_ID)_(MAIN|FALLBACK))$/.test(r.keyName)
-  ),[records,account,repository]);
+  ),[records,account,repository,kind]);
 
   function resetReview(){setReview([]);setApproval(false);}
   function resetComparison(){setInventory([]);setEnvironmentName(null);setInspected(false);setSelected([]);setKeyOverrides({});resetReview();}
@@ -166,7 +167,7 @@ export function VaultGithubSync({session,records,onPersist}:{
         const record:VaultRecord={
           id:crypto.randomUUID(),systems:[systemForProject(reviewedRepository.name)],
           otherSystem:"",service:"GitHub",customService:"",
-          keyName:item.name,secret:kind==="variable"?(item.value??""):"",usedIn:[account],
+          keyName:item.name,secret:kind==="variable"?(item.value??""):"",githubType:kind,usedIn:[account],
           destinationSystem:reviewedRepository.fullName,needsReview:false,
           githubTargets:[{account,repo:reviewedRepository.fullName,scope,kind,keyName:item.name}]
         };
@@ -217,6 +218,7 @@ export function VaultGithubSync({session,records,onPersist}:{
       <button type="button" className="button-secondary" disabled={!!busy || !repository} onClick={()=>void inspect()}>
         <RefreshCw size={14}/> Compare GitHub {scope} {kind}s</button>
       {inspected&&repository&&<div className="space-y-3">
+        <p className="text-xs text-muted-foreground">Showing Vault entries classified as {kind}s. Edit the Vault entry type to change its destination visibility.</p>
         <p className="text-xs text-muted-foreground">{inventory.length} existing entries in {repository.fullName} /
           {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. {kind==="secret"?"Secret values cannot be retrieved.":"Readable variable values can be pulled into the encrypted Vault."}
           {kind==="variable"?" Warning: GitHub Actions variables are not secret and can be read by permitted users.":""}</p>

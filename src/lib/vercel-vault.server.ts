@@ -5,7 +5,7 @@ import { assertReviewedProductionWrite, planProductionKey, type VercelEnvMeta } 
 type ConnectionInput = { token: string; vercelToken: string; teamId: string };
 type ProjectInput = ConnectionInput & { projectId: string };
 type WriteInput = ProjectInput & {
-  key: string; value: string; action: "create" | "replace";
+  key: string; value: string; action: "create" | "replace"; vercelType?: "secret" | "config";
   expectedId?: string | null; expectedUpdatedAt?: number | null;
 };
 
@@ -92,14 +92,17 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
     if (/^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|todo\b|change-me(?:$|[-_ ]))/i.test(data.value.trim()))
       throw new Error("Vault placeholder values cannot be pushed to Production.");
     if (data.action !== "create" && data.action !== "replace") throw new Error("Invalid sync action.");
+    if (data.vercelType !== undefined && !["secret","config"].includes(data.vercelType)) throw new Error("Invalid Vercel variable type.");
+    const visibility = data.vercelType === "config" ? "config" : "secret";
+    const targetType = visibility === "config" ? "plain" : "sensitive";
     // Compare a fresh server-side snapshot to the exact action reviewed in the browser.
     const current = await readEnvironments(data);
     const plan = assertReviewedProductionWrite(current, data);
     const projectPath = "/v9/projects/" + encodeURIComponent(data.projectId) + "/env";
     if (plan.action === "create") {
-      await vercelApi(projectPath + scope(data.teamId), data.vercelToken, {
+      await vercelApi("/v10/projects/" + encodeURIComponent(data.projectId) + "/env" + scope(data.teamId), data.vercelToken, {
         method: "POST",
-        body: JSON.stringify({key: data.key, value: data.value, type: "sensitive", target: ["production"]}),
+        body: JSON.stringify({key: data.key, value: data.value, type: targetType, visibility, target: ["production"]}),
       });
     } else if (plan.action === "replace") {
       const currentRow = current.find(row => row.id === plan.expectedId)!;
@@ -107,14 +110,16 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
       await vercelApi(
         projectPath + "/" + encodeURIComponent(plan.expectedId) + scope(data.teamId),
         data.vercelToken,
-        {method: "PATCH", body: JSON.stringify({value: data.value})}
+        {method: "PATCH", body: JSON.stringify({value: data.value, type: targetType, visibility})}
       );
     }
     // Values marked Secret by Vercel are deliberately unreadable. Verify metadata presence, not plaintext equality.
     const after = await readEnvironments(data);
     if (planProductionKey(after, data.key).action !== "replace")
       throw new Error("Vercel accepted the write but verification was inconclusive. Check Production before retrying.");
-    return {ok: true, key: data.key, action: plan.action, target: "production" as const, presenceVerified: true, valueVerified: false};
+    const actual = after.find(row => row.key === data.key);
+    if (!actual || actual.visibility !== visibility) throw new Error("Vercel variable visibility could not be verified. Reinspect Production before retrying.");
+    return {ok: true, key: data.key, action: plan.action, target: "production" as const, presenceVerified: true, typeVerified: true, valueVerified: false};
   }
 );
 export const importVaultVercelConfig = createServerFn({method:"POST"}).handler(

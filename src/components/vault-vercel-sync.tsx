@@ -143,7 +143,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         try {
           await writeVaultVercelProduction({data:{
             ...connectionData(),projectId:sameProject.id,key:item.key,value:source.secret,
-            action:item.plan.action,expectedId:item.plan.expectedId,expectedUpdatedAt:item.plan.expectedUpdatedAt
+            action:item.plan.action,vercelType:source.vercelType||"secret",expectedId:item.plan.expectedId,expectedUpdatedAt:item.plan.expectedUpdatedAt
           }});
           applied++;
         } catch(err:any) { failure=item.key+": "+String(err?.message||"Vercel rejected the update.");break; }

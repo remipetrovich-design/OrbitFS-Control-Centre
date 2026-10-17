@@ -114,7 +114,7 @@ export function normalizeVaultRecord(row:VaultRecord):VaultRecord {
  const hasSourceDestination=selectedDestinations.length>0;
  const inferred=service==="Vercel"?MAIN_VERCEL_INVENTORY.find(x=>x.system===system&&x.name===exact):null;
  return {
-   ...row,systems:[system],service,otherSystem:system==="Other"?(row.otherSystem||""):"",
+   ...row,githubType:row.githubType==="variable"?"variable":"secret",systems:[system],service,otherSystem:system==="Other"?(row.otherSystem||""):"",
    customService:service==="Other"?(row.customService||""):"",
    // Preserve non-verified names intact; mark them for manual review.
    keyName:exact||legacyKey,

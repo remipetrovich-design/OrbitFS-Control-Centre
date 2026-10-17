@@ -30,7 +30,7 @@ const VAULT_DESTINATIONS = [
   {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
 ] as const;
 
-const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
+const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Dev",keyName:"APP_URL",keyValue:"",vercelType:"config",usedIn:["main"],destinationSystem:"base-deploy-panel"},{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"",vercelType:"secret",usedIn:["fallback"],destinationSystem:"orbitfs-billing-fallback"}]};
 const SERVICES=[...VAULT_SERVICES];
 const VAULT_TABS = ["License","Billing","Dev","Base System","Shared Engine","AI Repair Centre","Database","Other"] as const;
 type VaultTab = typeof VAULT_TABS[number];
@@ -86,8 +86,8 @@ export function VaultWorkspace({session}:{session:any}){
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [customDestination,setCustomDestination]=useState(false);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
-  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
-  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
+  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",vercelType:"secret" as "secret"|"config",githubType:"secret" as "secret"|"variable",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
+  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",vercelType:"secret" as "secret"|"config",githubType:"secret" as "secret"|"variable",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
 
   useEffect(()=>{void loadEnvelope()},[session?.token]);
 
@@ -136,7 +136,7 @@ export function VaultWorkspace({session}:{session:any}){
       if(!draft.destinationSystems.length)throw new Error("Choose at least one exact destination project or repository before saving.");
       // Explicit destination selection controls targeting; usedIn is a display label only.
       if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:Array.from(new Set(draft.destinationSystems.flatMap(value=>VAULT_DESTINATIONS.filter(item=>item.value===value).map(item=>item.mode)).concat(draft.usedIn))) as VaultMode[],destinationSystem:draft.destinationSystems[0]||"",destinationSystems:draft.destinationSystems,needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets,syncReceipts:editing?.keyName===keyName&&editing?.secret===draft.secret?editing?.syncReceipts:[]};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,vercelType:draft.vercelType,githubType:draft.githubType,purpose:draft.purpose,usedIn:Array.from(new Set(draft.destinationSystems.flatMap(value=>VAULT_DESTINATIONS.filter(item=>item.value===value).map(item=>item.mode)).concat(draft.usedIn))) as VaultMode[],destinationSystem:draft.destinationSystems[0]||"",destinationSystems:draft.destinationSystems,needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets,syncReceipts:editing?.keyName===keyName&&editing?.secret===draft.secret&&editing?.githubType===draft.githubType&&editing?.vercelType===draft.vercelType?editing?.syncReceipts:[]};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setCustomDestination(false);setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
@@ -197,7 +197,7 @@ export function VaultWorkspace({session}:{session:any}){
         service:row.service,
         system:row.systems[0]||"Other",
         keyName:row.keyName,
-        keyValue:row.secret||"",
+        keyValue:row.secret||"",vercelType:row.vercelType||"secret",githubType:row.githubType||"secret",
         purpose:row.purpose||"",
         usedIn:row.usedIn||[],
         destinationSystem:row.destinationSystem||"",
@@ -227,7 +227,7 @@ export function VaultWorkspace({session}:{session:any}){
       warning:"UNENCRYPTED FILE: contains saved Vault secret values. Protect this file.",
       entries:selected.map(row=>({
         service:row.service,system:row.systems[0]||"Other",
-        keyName:row.keyName,keyValue:row.secret||"",purpose:row.purpose||"",
+        keyName:row.keyName,keyValue:row.secret||"",vercelType:row.vercelType||"secret",githubType:row.githubType||"secret",purpose:row.purpose||"",
         usedIn:row.usedIn||[],destinationSystem:row.destinationSystem||"",
         destinationSystems:row.destinationSystems?.length?row.destinationSystems:vaultDestinations(row),
         valueSource:row.valueSource||"Vault saved value"
@@ -256,7 +256,7 @@ export function VaultWorkspace({session}:{session:any}){
       warning:"UNENCRYPTED FILE: contains saved Vault secret values. Protect this file.",
       entries:selected.map(row=>({
         service:row.service,system:row.systems[0]||"Other",keyName:row.keyName,
-        keyValue:row.secret||"",purpose:row.purpose||"",usedIn:row.usedIn||[],
+        keyValue:row.secret||"",vercelType:row.vercelType||"secret",githubType:row.githubType||"secret",purpose:row.purpose||"",usedIn:row.usedIn||[],
         destinationSystem:row.destinationSystem||"",
         destinationSystems:row.destinationSystems?.length?row.destinationSystems:vaultDestinations(row),
         valueSource:row.valueSource||"Vault saved value"
@@ -314,7 +314,7 @@ export function VaultWorkspace({session}:{session:any}){
         const record:VaultRecord={
           id:crypto.randomUUID(),systems:[String(item.system||"Other")],
           otherSystem:"",service:String(item.service||"Other"),customService:"",
-          keyName:rawName,secret:rawSecret,purpose:String(item.purpose||""),valueSource:String(item.valueSource||""),
+          keyName:rawName,secret:rawSecret,vercelType:item.vercelType==="config"?"config":"secret",githubType:item.githubType==="variable"?"variable":"secret",purpose:String(item.purpose||""),valueSource:String(item.valueSource||""),
           usedIn:modern?(Array.isArray(item.usedIn)?item.usedIn:[]):undefined,
           destinationSystem:modern?String(item.destinationSystem||""):"",
           destinationSystems:modern&&Array.isArray(item.destinationSystems)?item.destinationSystems.map(String):undefined
@@ -390,7 +390,7 @@ export function VaultWorkspace({session}:{session:any}){
     setEditing(row);setDraft({
       system:normalized.systems[0]||"Other",otherSystem:normalized.otherSystem||"",
       service:normalized.service,customService:normalized.customService||"",
-      keyName:normalized.keyName,secret:normalized.secret,purpose:normalized.purpose||"",
+      keyName:normalized.keyName,secret:normalized.secret,vercelType:normalized.vercelType||"secret",githubType:normalized.githubType||"secret",purpose:normalized.purpose||"",
       usedIn:normalized.usedIn||[],destinationSystem:normalized.destinationSystem||"",destinationSystems:vaultDestinations(normalized)
     });
     requestAnimationFrame(()=>document.getElementById("vault-entry-editor")?.scrollIntoView({behavior:"smooth",block:"start"}));
@@ -505,7 +505,9 @@ export function VaultWorkspace({session}:{session:any}){
                     <p className="text-muted-foreground">Assigned means selected for this destination. Sent confirms a recorded provider write; actual application usage is not verified.</p>
                   </div>
                   {row.needsReview&&<p className="mt-1 text-xs text-amber-500">Review destination before syncing</p>}
-                  <p className="mt-2 break-all font-mono text-xs">{visible.includes(row.id)?row.secret||"(blank)":row.secret?"••••••••••••":"(blank)"}</p>
+                  {row.service==="GitHub"&&<p className="mt-1 text-xs text-muted-foreground">GitHub type: <strong>{row.githubType==="variable"?"Variable (readable)":"Secret (hidden)"}</strong></p>}
+                  {row.service==="Vercel"&&<p className="mt-1 text-xs text-muted-foreground">Vercel type: <strong>{row.vercelType==="config"?"Config (readable)":"Secret (hidden)"}</strong></p>}
+                  <p className="mt-2 break-all font-mono text-xs">{(row.service==="Vercel"&&row.vercelType==="config")||visible.includes(row.id)?row.secret||"(blank)":row.secret?"••••••••••••":"(blank)"}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1">
                   <button type="button" className="icon-button" aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} title={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(old=>old.includes(row.id)?old.filter(id=>id!==row.id):[...old,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button>
@@ -532,6 +534,8 @@ export function VaultWorkspace({session}:{session:any}){
         {draft.service==="Other"&&<label className="block text-xs font-medium">Other service<input className="control mt-1" value={draft.customService} onChange={e=>setDraft({...draft,customService:e.target.value})}/></label>}
         {draft.system==="Other"&&<label className="block text-xs font-medium">Other system<input className="control mt-1" value={draft.otherSystem} onChange={e=>setDraft({...draft,otherSystem:e.target.value})}/></label>}
         <label className="block text-xs font-medium">Key name · exact<input className="control mt-1 font-mono" autoComplete="off" value={draft.keyName} onChange={e=>setDraft({...draft,keyName:e.target.value})} placeholder="e.g. BILLING_API_TOKEN"/></label>
+        <label className="block text-xs font-medium">Vercel variable type<select aria-label="Vercel variable type" className="control mt-1" disabled={draft.service!=="Vercel"} value={draft.vercelType} onChange={e=>setDraft({...draft,vercelType:e.target.value as "secret"|"config"})}><option value="secret">Secret · hidden in Vercel</option><option value="config">Config · readable in Vercel</option></select><span className="block mt-1 text-xs text-muted-foreground">{draft.service==="Vercel"?"Applied on the next reviewed manual Vercel send.":"Choose Vercel service to edit visibility."}</span></label>
+        {draft.service==="GitHub"&&<label className="block text-xs font-medium">GitHub Actions type<select aria-label="GitHub Actions type" className="control mt-1" value={draft.githubType} onChange={e=>setDraft({...draft,githubType:e.target.value as "secret"|"variable"})}><option value="secret">Secret · hidden in GitHub</option><option value="variable">Variable · readable in GitHub</option></select><span className="block mt-1 text-xs text-muted-foreground">Used when reviewing a manual Vault → GitHub Actions sync. Variables are not suitable for credentials.</span></label>}
         <label className="block text-xs font-medium">Key value<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide value":"Show value"}</button></label>
         <label className="block text-xs font-medium md:col-span-2">What this key is for<input className="control mt-1" value={draft.purpose} onChange={e=>setDraft({...draft,purpose:e.target.value})} placeholder="e.g. Billing API access to License Manager"/></label>
         <p className="text-xs text-muted-foreground md:col-span-2">Choose Main and Fallback targets below. The system category is for organisation only; it does not restrict where a variable can be applied.</p>

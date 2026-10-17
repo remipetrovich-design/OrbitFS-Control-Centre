@@ -72,18 +72,16 @@ const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE
 
 function detectUpdateComponents(files:any[]){
  const out:string[]=[];
- const add=(value:string)=>{if(["base","apex","mcp","studio"].includes(value)&&!out.includes(value))out.push(value)};
+ const add=(value:string)=>{if(["base","engine-shared","apex","mcp","studio"].includes(value)&&!out.includes(value))out.push(value)};
  for(const item of files||[]){
   const path=String(item?.filename||item?.file||"").toLowerCase().replaceAll("\\","/");
   const migration=path.match(/^supabase\/migrations\/(shared|base|apex|mcp|studio)\/\d{14}_[a-z0-9._-]+\.sql$/i);
   const sourcePath=path.startsWith("src/")||/^(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|\.npmrc)$/.test(path);
-  if(migration&&migration[1]!=="shared")add(migration[1].toLowerCase());
+  if(migration)add(migration[1]==="shared"?"engine-shared":migration[1].toLowerCase());
   if(path.includes("/addons/apex/"))add("apex");
   if(path.includes("/addons/mcp/"))add("mcp");
   if(path.includes("/addons/studio/"))add("studio");
-  if(!migration&&sourcePath&&!path.includes("/addons/apex/")&&!path.includes("/addons/mcp/")&&!path.includes("/addons/studio/")){
-   add("apex");add("mcp");add("studio");
-  }
+  if(!migration&&sourcePath&&!path.includes("/addons/apex/")&&!path.includes("/addons/mcp/")&&!path.includes("/addons/studio/"))add("engine-shared");
  }
  return out;
 }
@@ -219,7 +217,7 @@ async function initialEngineSourceBaseline(head:string){
  if(String(parsed?.sourceRepository||"")!==ENGINE_REPO||String(parsed?.releaseBranch||"")!==ENGINE_REF)throw new Error("Engine update baseline declaration does not match the configured Update source.");
  if(!isOrbitReleaseVersion(initialReleaseVersion))throw new Error("Engine update baseline declaration is missing a valid 2–4 part numeric initialReleaseVersion");
  if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the exact UPDATE_RELEASE snapshot SHA.");
- return {sha:head,ref:"release/update-baseline.json",initialReleaseVersion,locked:true,mode:"snapshot",components:["apex","mcp","studio"]};
+ return {sha:head,ref:"release/update-baseline.json",initialReleaseVersion,locked:true,mode:"snapshot",components:["engine-shared","apex","mcp","studio"]};
 }
 
 type PanelUser={id:string;email:string;display_name:string;role:string};
@@ -578,7 +576,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
  const releaseType=data.type==="base"?"base":"update";
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
  const ref=data.type==="base"?BASE_REF:ENGINE_REF;
- const components=data.type==="base"?["base"]:[...new Set((data.components||[]).map(x=>String(x).trim().toLowerCase()).filter(x=>["base","apex","mcp","studio"].includes(x)))];
+ const components=data.type==="base"?["base"]:[...new Set((data.components||[]).map(x=>String(x).trim().toLowerCase()).filter(x=>["base","engine-shared","apex","mcp","studio"].includes(x)))];
  if(data.type==="engine"&&!components.length)throw new Error("Select at least one Update component before saving.");
  const expectedTemplate=data.type==="base"?"base_deployment_log":"update_changelog";
  const template=String(data.changelogTemplate||expectedTemplate);
@@ -866,10 +864,34 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
      .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
  } catch {}
 
+ // Update inspection must cover BASE independently of Engine's source diff.
+ // A Base-only update can be prepared even when UPDATE_RELEASE has no new files.
+ let baseInspection:any=null;
+ if(data.type==="engine"){
+  const inspectedRepo=BASE_REPO,inspectedRef=BASE_REF;
+  try{
+   if(!baseBaseline)throw new Error("No approved published Base baseline with a valid database snapshot is available.");
+   const publishedRepo=String(baseBaseline.source_repo||"").trim();
+   const publishedRef=String(baseBaseline.source_ref||"").trim();
+   const baselineSourceSha=String(baseBaseline.source_sha||"").trim();
+   if(publishedRepo!==inspectedRepo||publishedRef!==inspectedRef||!/^[a-f0-9]{40}$/i.test(baselineSourceSha))throw new Error("Published Base baseline is not from the active Base repository and release ref.");
+   const source=await github(`/repos/${inspectedRepo}/git/ref/heads/${encodeURIComponent(inspectedRef)}`);
+   const head=String(source?.object?.sha||"").trim();
+   if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the current Base release ref.");
+   const diff=head===baselineSourceSha?{files:[],summary:sourceChangeSummary([]),diffComplete:true}:await completeSourceDiff(inspectedRepo,baselineSourceSha,head);
+   const changedFiles=diff.files||[];
+   baseInspection={repo:inspectedRepo,ref:inspectedRef,head,baselineReleaseId:String(baseBaseline.id||""),baselineVersion:String(baseBaseline.version||""),baselineSourceSha,
+    changedFileCount:changedFiles.length,changedFiles:changedFiles.slice(0,100).map((entry:any)=>({filename:entry.filename,status:entry.status})),
+    changeSummary:diff.summary||sourceChangeSummary(changedFiles),diffComplete:diff.diffComplete===true,
+    ready:changedFiles.length>0&&diff.diffComplete===true,
+    error:changedFiles.length===0?"Base release source matches the currently published Base; no Base patch is available.":diff.diffComplete!==true?"Base source comparison was incomplete. Re-inspect before packaging.":null};
+  }catch(error:any){baseInspection={repo:inspectedRepo,ref:inspectedRef,ready:false,error:String(error?.message||error),changedFiles:[],changedFileCount:0};}
+ }
+
  const inspectedAt=new Date().toISOString();
  const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha||null,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
  const from=String(baseline?.source_sha||"");
- const baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,kind:data.type==="base"?"published_base":"published_update",channel}:null;
+ const baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,components:Array.isArray(baseline.manifest?.components)?baseline.manifest.components:[],kind:data.type==="base"?"published_base":"published_update",channel}:null;
 
  if(!from&&data.type==="engine"){
    const initial=await initialEngineSourceBaseline(head);
@@ -877,7 +899,7 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
    const summary=sourceChangeSummary(files);
    const info={id:null,version:initial.initialReleaseVersion,sourceSha:head,kind:"initial_snapshot",ref:initial.ref,locked:initial.locked,initialReleaseVersion:initial.initialReleaseVersion,channel};
    return {
-    repo,ref,head,baseline:info,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:true,
+    repo,ref,head,baseline:info,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:false,initialUpdate:true,
     inspectionMode:"initial_snapshot",detectedComponents:initial.components,files,commits:[],
     changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt,publishedBaselineSha:from||null
    };
@@ -886,21 +908,21 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
    const files=await sourceSnapshotFiles(repo,head);
    const summary=sourceChangeSummary(files);
    return {
-    repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,initialRelease:true,initialUpdate:false,
+    repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:true,initialUpdate:false,
     inspectionMode:"full_snapshot",detectedComponents:[],files,commits:[],
     changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt,publishedBaselineSha:from||null
    };
  }
 
  if(from===head)return {
-  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:false,initialUpdate:false,
   inspectionMode:"compare",detectedComponents:[],files:[],commits:[],
   changeSummary:sourceChangeSummary([]),diffComplete:true,baselineFileCount:null,currentFileCount:null,hasSourceChanges:false,inspectedAt,publishedBaselineSha:from||null
  };
 
  const diff=await completeSourceDiff(repo,from,head);
  return {
-  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:false,initialUpdate:false,
   inspectionMode:"compare",
   detectedComponents:data.type==="engine"?detectUpdateComponents(diff.files):[],
   files:diff.files,commits:diff.commits,changeSummary:diff.summary,diffComplete:diff.diffComplete,
@@ -1145,11 +1167,11 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  };
 });
 
-export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
+export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;inspectedBaseSourceSha?:string;inspectedBaseBaselineSha?:string;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
  const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const version=data.version.trim();
  if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
- if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
+ if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Shared Engine Host, Apex, MCP, or Studio).");
  const channel=normalizeChannel(data.channel);
  const repackage=Boolean(data.repackage);
  const repackageReleaseId=String(data.repackageReleaseId||"").trim();
@@ -1206,9 +1228,18 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
    if(baselineSourceRepo!==BASE_REPO||baselineSourceRef!==BASE_REF||!/^[a-f0-9]{40}$/i.test(baselineSourceCommit)){
     throw new Error("The compatible published Base does not have a valid source identity for the active Base release branch.");
    }
+   // Verify the selected Base target against authoritative source here.
+   // Missing browser-only pins cannot create a select/re-inspect loop; supplied
+   // pins still protect against stale or modified source.
+   const inspectedBaseSourceSha=String(data.inspectedBaseSourceSha||"").trim();
+   const inspectedBaseBaselineSha=String(data.inspectedBaseBaselineSha||"").trim();
+   if(inspectedBaseSourceSha&&!/^[a-f0-9]{40}$/i.test(inspectedBaseSourceSha))throw new Error("Invalid inspected Base source commit.");
+   if(inspectedBaseBaselineSha&&!/^[a-f0-9]{40}$/i.test(inspectedBaseBaselineSha))throw new Error("Invalid inspected published Base baseline commit.");
+   if(inspectedBaseBaselineSha&&inspectedBaseBaselineSha!==baselineSourceCommit)throw new Error("The published Base baseline has changed since inspection. Re-inspect before packaging.");
    const baseBranch=await github(`/repos/${BASE_REPO}/git/ref/heads/${encodeURIComponent(BASE_REF)}`);
    const baseHead=String(baseBranch?.object?.sha||"").trim();
    if(!/^[a-f0-9]{40}$/i.test(baseHead))throw new Error(`Could not resolve ${BASE_REPO}@${BASE_REF} for the Base target.`);
+   if(inspectedBaseSourceSha&&baseHead!==inspectedBaseSourceSha)throw new Error("Base release source changed after inspection. Re-inspect before packaging so the update includes the reviewed source commit.");
    if(baseHead===baselineSourceCommit)throw new Error(`Base was selected, but ${BASE_REF} matches published Base v${baselineBase.version}. Make Base changes first or deselect Base.`);
    const baseDiff=await completeSourceDiff(BASE_REPO,baselineSourceCommit,baseHead);
    if(!baseDiff.files.length)throw new Error(`Base was selected, but no Base files changed between published v${baselineBase.version} and ${BASE_REF}.`);
@@ -1273,21 +1304,24 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   sourceDiffMeta=diff;
  }
 
+ const selectedComponents = data.type === "engine"
+   ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","engine-shared","apex","mcp","studio"].includes(x)))]
+   : ["base"];
+ const previouslyReleasedTargets=new Set((Array.isArray(previousRelease?.manifest?.components)?previousRelease.manifest.components:[]).map((value:any)=>String(value||"").trim().toLowerCase()));
+ const hasNewUpdateTarget=data.type==="engine"&&selectedComponents.some((component:string)=>component!=="base"&&!previouslyReleasedTargets.has(component));
  const hasCapturedBaseChanges=data.type==="engine"&&Boolean(updateBaseSource);
- if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage&&!hasCapturedBaseChanges){
+ if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage&&!hasCapturedBaseChanges&&!hasNewUpdateTarget){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
  }
- if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage&&!hasCapturedBaseChanges){
+ if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage&&!hasCapturedBaseChanges&&!hasNewUpdateTarget){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
  }
 
- const selectedComponents = data.type === "engine"
-   ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","apex","mcp","studio"].includes(x)))]
-   : ["base"];
  const databasePackages=await ensureAutomaticReleaseDatabasePackages(data.type,selectedComponents);
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
- const missingDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
- if(missingDetectedComponents.length)throw new Error(`Stage 1 targets do not cover detected Update changes: ${missingDetectedComponents.join(", ")}. Re-inspect the Update source before building.`);
+ // File changes indicate suggested targets, not mandatory additions.
+ // The selected targets alone authorize which deployment payloads are built.
+ const excludedDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
 
  const compactDispatchFile=(file:any)=>({
   filename:String(file?.filename||""),
@@ -1318,6 +1352,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   initialUpdate,
   sourceBaselineKind,
   detectedComponents,
+  excludedDetectedComponents,
   changedFiles: dispatchFiles,
   changedFilesTruncated: detectedFiles.length > dispatchFiles.length,
   components: selectedComponents,
@@ -1350,6 +1385,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   source_sha:head,
   database_source_commit:String(databasePackages.sourceCommit||""),
   base:String(selectedComponents.includes("base")),
+  engine_shared:String(selectedComponents.includes("engine-shared")),
   apex:String(selectedComponents.includes("apex")),
   mcp:String(selectedComponents.includes("mcp")),
   studio:String(selectedComponents.includes("studio")),
@@ -1442,7 +1478,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  }
  return {ok:true,repo:workerRepo,ref:workerRef,sourceRepo:repo,sourceRef:ref,sourceSha:head,workflow,channel,runId:runId||null,draftId:draft.id,attemptNumber};
 }
-export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null}})=>{
+export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;inspectedBaseSourceSha?:string;inspectedBaseBaselineSha?:string;repackage?:boolean;repackageReleaseId?:string|null}})=>{
  const actor=readSession(data.token);
  return startReleaseCore(data,actor);
 });
@@ -1475,12 +1511,9 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
  let status=String(release.status||"").toLowerCase();
- const everPublished=status==="published"||Boolean(release.published_at);
- if(everPublished)throw new Error("Published release history cannot be permanently deleted.");
- if(!release.published_at&&status!=="draft"&&!release.archived_at){
-  await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Archived automatically before permanent deletion by Dev Panel"})});
-  status="archived";
- }
+ // Only a currently published release is protected from deletion.
+ // License Manager remains authoritative; published_at is historical metadata.
+ if(status==="published")throw new Error("Currently published releases cannot be deleted. Unpublish or withdraw this release first.");
  const expected=`DELETE_RELEASE:${id}:${release.version}`;
 
  await billingStoreReset({
@@ -1719,7 +1752,10 @@ async function github(path:string,init:RequestInit={}){
    const message=String(error?.message||error);
    if(/rate limit|secondary rate|abuse detection|HTTP 429|API rate/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+5*60_000);
    if(cached&&cached.staleUntil>Date.now())return cached.value;
-   if(/bad credentials/i.test(message))throw new Error("GitHub credential rejected (401). Check the selected source profile's GitHub token and repository permissions.");
+   if(/bad credentials|HTTP 401|Request failed \(401\)/i.test(message)){
+    const repo=/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]||"unknown repository";
+    throw new Error("MAIN GitHub authentication rejected (401) for "+repo+" while requesting "+path.split("?")[0]+". Check the active Dev Panel deployment's MAIN GitHub credential and repository permissions.");
+   }
    throw error;
   }
  })();
@@ -1746,11 +1782,17 @@ async function billingStoreReset(input:{releaseIds:string[];version:string;relea
  base.search="";
  base.hash="";
  const secret=required("DEV_PANEL_EVENT_SECRET");
- return requestJson(base.origin+"/api/internal/orbitfs/release-reset",{
-  method:"POST",
-  headers:{authorization:"Bearer "+secret},
-  body:JSON.stringify(input)
- });
+ try{
+  return await requestJson(base.origin+"/api/internal/orbitfs/release-reset",{
+   method:"POST",
+   headers:{authorization:"Bearer "+secret},
+   body:JSON.stringify(input)
+  });
+ }catch(error:any){
+  const message=String(error?.message||error);
+  if(/unauthorized|\\b401\\b/i.test(message))throw new Error("Billing Store rejected release cleanup authorization (401). Verify DEV_PANEL_EVENT_SECRET matches on MAIN Dev Panel and Billing Store, then manually deploy both projects. No release was deleted.");
+  throw error;
+ }
 }
 
 
@@ -1763,13 +1805,51 @@ const MASTER_DATABASE_MIGRATION_WORKFLOW=String(process.env.MASTER_DATABASE_MIGR
 const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] as const;
 const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
 
+// Master Database is an explicitly pinned MAIN dependency. Validate each
+// configured candidate against that repository before use, just as source
+// inspection does; a stale first env var must not block release builds.
+let masterDatabaseValidatedToken:{token:string;expires:number}|null=null;
+async function masterDatabaseToken(){
+ const names=["MAIN_MASTER_DATABASE_GITHUB_TOKEN","MASTER_DATABASE_GITHUB_TOKEN","MAIN_GITHUB_RELEASE_TOKEN","MAIN_GITHUB_TOKEN","ORBITFS_PRIMARY_GITHUB_TOKEN","ORBITFS_RELEASE_DISPATCH_TOKEN"];
+ const candidates=[...new Set(names.map(name=>String(process.env[name]||"").trim()).filter(Boolean))];
+ if(!candidates.length)throw new Error("No MAIN Master Database GitHub credential configured.");
+ if(masterDatabaseValidatedToken&&masterDatabaseValidatedToken.expires>Date.now()&&candidates.includes(masterDatabaseValidatedToken.token))return masterDatabaseValidatedToken.token;
+ const results:string[]=[];
+ for(const token of candidates){
+  let response:Response;
+  try{
+   response=await fetch("https://api.github.com/repos/"+MASTER_DATABASE_REPO,{
+    headers:{authorization:"Bearer "+token,accept:"application/vnd.github+json","x-github-api-version":"2022-11-28"},
+    cache:"no-store",signal:AbortSignal.timeout(8000)
+   });
+  }catch{
+   throw new Error("MAIN Master Database GitHub credential validation is unavailable. No release action dispatched.");
+  }
+  if(response.ok){
+   masterDatabaseValidatedToken={token,expires:Date.now()+60_000};
+   return token;
+  }
+  results.push(String(response.status));
+  if(![401,403,404].includes(response.status))throw new Error("Master Database GitHub validation HTTP "+response.status+". No release action dispatched.");
+ }
+ masterDatabaseValidatedToken=null;
+ throw new Error("No configured MAIN token can access "+MASTER_DATABASE_REPO+" (GitHub HTTP statuses: "+results.join(", ")+"). No release action dispatched.");
+}
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
- const token=String(process.env.MAIN_MASTER_DATABASE_GITHUB_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.MAIN_GITHUB_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
- if(!token)throw new Error("Master Database GitHub control token is not configured.");
- return requestJson("https://api.github.com"+path,{
-  ...init,
-  headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}
+ await requireLocalGithubProfileActive();
+ if(path!=="/repos/"+MASTER_DATABASE_REPO&&!path.startsWith("/repos/"+MASTER_DATABASE_REPO+"/"))throw new Error("Master Database GitHub request outside pinned MAIN repository blocked.");
+ const request=async(token:string)=>requestJson("https://api.github.com"+path,{
+  ...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}
  });
+ const token=await masterDatabaseToken();
+ try{return await request(token)}
+ catch(error:any){
+  if(!/bad credentials|\\b401\\b|\\b403\\b/i.test(String(error?.message||error)))throw error;
+  masterDatabaseValidatedToken=null;
+  const next=await masterDatabaseToken();
+  if(next===token)throw new Error("MAIN Master Database GitHub credential rejected for "+path.split("?")[0]+". No release action dispatched.");
+  return request(next);
+ }
 }
 function cleanDatabaseRun(run:any){
  return run?{
@@ -1801,11 +1881,11 @@ async function latestDispatchedDatabaseRun(workflow:string,startedAt:number){
 
 function requiredDatabaseComponentsForRelease(type:"base"|"engine",components:string[]){
  if(type==="base")return ["base"];
- const selected=[...new Set((components||[]).map(value=>String(value||"").trim().toLowerCase()).filter(value=>["base","mcp","apex","studio"].includes(value)))];
+ const selected=[...new Set((components||[]).map(value=>String(value||"").trim().toLowerCase()).filter(value=>["base","engine-shared","mcp","apex","studio"].includes(value)))];
  const required:string[]=[];
  if(selected.includes("base"))required.push("base");
  const engineComponents=selected.filter(value=>["mcp","apex","studio"].includes(value));
- if(engineComponents.length)required.push("engine-shared",...engineComponents);
+ if(engineComponents.length||selected.includes("engine-shared"))required.push("engine-shared",...engineComponents);
  return [...new Set(required)];
 }
 async function resolvedAutomaticDatabasePackages(requiredComponents:string[],expectedSourceCommit:string){
@@ -2342,8 +2422,8 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
   if(!currentSha)throw new Error("Cannot resolve the latest main commit for Quick Deploy.");
   const latest=[normal?.workflow_runs?.[0],quick?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
   const baselineSha=String(latest?.head_sha||"")||null;
-  if(baselineSha===currentSha)throw new Error("No new commits to Quick Deploy: current main is already marked deployed.");
-  const rows=baselineSha?await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha):[];
+  // Explicit manual Quick Deploy can redeploy current main without requiring new commits.
+  const rows=baselineSha&&baselineSha!==currentSha?await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha):[];
   quickUpdates={baselineSha,currentSha,commits:rows.map((c:any)=>({sha:String(c.sha||""),message:String(c.commit?.message||"").split("\n")[0]}))};
  }
  const startedAt=Date.now();

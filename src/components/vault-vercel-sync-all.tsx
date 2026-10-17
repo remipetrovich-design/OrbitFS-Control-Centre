@@ -38,7 +38,7 @@ export function VaultVercelSyncAll({session,records,onPersist}:{
  const [sourceFingerprint,setSourceFingerprint]=useState("");
  const token=(mode:Account)=>bestVaultConnection(records,"VERCEL_TOKEN_"+mode.toUpperCase())?.secret||"";
  const team=(mode:Account)=>bestVaultConnection(records,"VERCEL_TEAM_ID_"+mode.toUpperCase())?.secret||TEAMS[mode];
- const fp=()=>JSON.stringify(records.map(r=>[r.id,r.service,r.keyName,r.secret,r.usedIn,r.destinationSystems,r.destinationSystem,r.vercelTargets]));
+ const fp=()=>JSON.stringify(records.map(r=>[r.id,r.service,r.keyName,r.secret,r.usedIn,r.destinationSystems,r.destinationSystem,r.vercelType,r.vercelTargets]));
  const groups=useMemo(()=>candidates.reduce<Record<string,Candidate[]>>((result,item)=>{
    const key=item.mode+" / "+item.projectName;
    (result[key]??=[]).push(item);return result;
@@ -115,7 +115,7 @@ export function VaultVercelSyncAll({session,records,onPersist}:{
      try{
        await writeVaultVercelProduction({data:{
          token:session.token,vercelToken:cred,teamId,projectId:item.projectId,
-         key:item.key,value:row.secret,action:item.action as "create"|"replace",
+         key:item.key,value:row.secret,vercelType:row.vercelType||"secret",action:item.action as "create"|"replace",
          expectedId:item.plan.expectedId,expectedUpdatedAt:item.plan.expectedUpdatedAt
        }});
        successes.push(item);
