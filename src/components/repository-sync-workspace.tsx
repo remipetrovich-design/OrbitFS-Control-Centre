@@ -1,4 +1,4 @@
-import {useCallback,useState} from "react";
+import {useCallback,useEffect,useState} from "react";
 import {ArrowLeft,ArrowRight,CheckCircle2,ExternalLink,GitBranch,RefreshCw,ShieldAlert,ShieldCheck,Loader2,AlertTriangle} from "lucide-react";
 import {getRepositorySyncState,runRepositorySync} from "@/lib/panel.server";
 
@@ -20,7 +20,8 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
   try{const result=await getRepositorySyncState({data:{token:session.token}});setState(result);setError("");}
   catch(e:any){setError(e?.message||"Unable to retrieve the live GitHub sync state.");}
  },[session.token]);
- // Sync status is requested only via Refresh or after the user starts a sync.
+ useEffect(()=>{void load();},[load]);
+ // Sync status is read on initial load, Refresh, or after a manual sync.
  const direction:Direction=directionChoice??(state?.side==="fallback"?"fallback-to-main":"main-to-fallback");
  const sourceOwner=direction==="main-to-fallback"?"lucaskerim123":"remipetrovich-design";
  const targetOwner=direction==="main-to-fallback"?"remipetrovich-design":"lucaskerim123";
