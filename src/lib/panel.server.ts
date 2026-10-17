@@ -2130,22 +2130,30 @@ const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"produc
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
 const REPOSITORY_SYNC_WORKFLOW="sync-github-mirrors.yml";
-// Off by default: installing or deploying this code must never activate cross-mode sync.
+// Manual-only code synchronization, never a deployment trigger.
 const repositorySyncEnabled=()=>process.env.ORBITFS_REPOSITORY_SYNC_ENABLED==="true";
-
+type RepositorySyncPair="base"|"engine"|"license"|"billing"|"control";
+type RepositorySyncDirection="main-to-fallback"|"fallback-to-main";
+const repositorySyncPairs=new Set<RepositorySyncPair>(["base","engine","license","billing","control"]);
+const repositorySyncDirections=new Set<RepositorySyncDirection>(["main-to-fallback","fallback-to-main"]);
+const activeRepositorySyncStatuses=new Set(["queued","in_progress","waiting","requested","pending"]);
+function verifiedRepositorySyncSelection(pair:string|undefined,direction:string|undefined){
+ if(!repositorySyncPairs.has(pair as RepositorySyncPair)||!repositorySyncDirections.has(direction as RepositorySyncDirection))
+  throw new Error("Select one valid repository pair and an explicit sync direction.");
+ return {pair:pair as RepositorySyncPair,direction:direction as RepositorySyncDirection};
+}
+function repositorySyncOwners(direction:RepositorySyncDirection){
+ return direction==="main-to-fallback"
+  ?{sourceOwner:"lucaskerim123",targetOwner:"remipetrovich-design"}
+  :{sourceOwner:"remipetrovich-design",targetOwner:"lucaskerim123"};
+}
 async function repositorySyncConfig(){
  await requireLocalGithubProfileActive();
  const profiles=githubProfileDefinitions();
  const side=localGithubProfileName();
  const source=side==="primary"?profiles.primary:profiles.fallback;
  const target=side==="primary"?profiles.fallback:profiles.primary;
- return {
-  side,
-  controlRepo:source.devPanel.repo,
-  sourceOwner:source.owner,
-  targetOwner:target.owner,
-  buttonLabel:side==="primary"?"Sync to fallback":"Sync to primary",
- };
+ return {side,controlRepo:source.devPanel.repo,sourceOwner:source.owner,targetOwner:target.owner};
 }
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
@@ -2157,61 +2165,63 @@ async function repositorySyncGithub(path:string,init:RequestInit={}){
   throw error;
  }
 }
-function repositorySyncIsPreview(run:any):boolean{
- // GitHub run-list and single-run APIs can omit workflow_dispatch inputs.
- // New manual runs label the operation explicitly; never trust an unlabeled
- // success as authorization to apply repository changes.
- const name=String(run?.display_title||run?.name||"");
- if(/^OrbitFS sync PREVIEW(?: · |$)/.test(name))return true;
- if(/^OrbitFS sync APPLY(?: · |$)/.test(name))return false;
- return run?.inputs?.preview===true||run?.inputs?.preview==="true";
+// Only an explicitly labelled single-pair workflow can authorize its own Apply.
+// Older "all five" runs and unlabeled success cannot be reused as approval.
+function repositorySyncRunMeta(run:any){
+ const title=String(run?.display_title||"");
+ const match=/^OrbitFS sync (PREVIEW|APPLY) · (base|engine|license|billing|control) · (main-to-fallback|fallback-to-main)(?: ·|$)/.exec(title);
+ return match?{preview:match[1]==="PREVIEW",pair:match[2] as RepositorySyncPair,direction:match[3] as RepositorySyncDirection}
+  :{preview:false,pair:null,direction:null};
 }
 function cleanRepositorySyncRun(run:any){
- return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,display_title:run.display_title,preview:repositorySyncIsPreview(run)}:null;
+ if(!run)return null;
+ return {id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,display_title:run.display_title,...repositorySyncRunMeta(run)};
+}
+async function listRepositorySyncRuns(controlRepo:string){
+ const response=await repositorySyncGithub("/repos/"+controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=100");
+ return (Array.isArray(response?.workflow_runs)?response.workflow_runs:[]).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime());
 }
 export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
  const cfg=await repositorySyncConfig();
- const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
- const runs=Array.isArray(result?.workflow_runs)?result.workflow_runs:[];
- // GitHub's list response may omit workflow_dispatch inputs. Hydrate the
- // latest run through the single-run endpoint before using it for approval.
- const newest=(result?.workflow_runs||[]).slice().sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
- if(newest?.id) {
-  const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+newest.id);
-  if(details?.inputs)newest.inputs=details.inputs;
+ const runs=await listRepositorySyncRuns(cfg.controlRepo);
+ const active=runs.find((run:any)=>activeRepositorySyncStatuses.has(String(run?.status||"").toLowerCase()))||null;
+ const pairRuns:Record<string,ReturnType<typeof cleanRepositorySyncRun>>={};
+ for(const run of runs){
+  const meta=repositorySyncRunMeta(run);
+  if(meta.pair&&meta.direction){
+   const key=meta.direction+":"+meta.pair;
+   if(!pairRuns[key])pairRuns[key]=cleanRepositorySyncRun(run);
+  }
  }
- const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
- const active=runs.filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase())).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
- return {...cfg,enabled:repositorySyncEnabled(),active:Boolean(active),activeRun:cleanRepositorySyncRun(active),latestRun:cleanRepositorySyncRun(latest)};
+ return {...cfg,enabled:repositorySyncEnabled(),active:Boolean(active),activeRun:cleanRepositorySyncRun(active),latestRun:cleanRepositorySyncRun(runs[0]),pairRuns};
 });
-export const runRepositorySync=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;operation?:"preview"|"apply"}})=>{
+export const runRepositorySync=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;operation:"preview"|"apply";pair:RepositorySyncPair;direction:RepositorySyncDirection}})=>{
  requireOperationsUser(data.token);
  if(!repositorySyncEnabled())throw new Error("Repository synchronization is disabled. Explicitly enable ORBITFS_REPOSITORY_SYNC_ENABLED=true before a manual sync.");
- const operation=data.operation==="apply"?"apply":"preview";
+ if(data.operation!=="preview"&&data.operation!=="apply")throw new Error("Choose Preview or Apply explicitly.");
+ const {pair,direction}=verifiedRepositorySyncSelection(data.pair,data.direction);
  const cfg=await repositorySyncConfig();
- const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
- const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
- if(active)return {ok:true,alreadyRunning:true,run:cleanRepositorySyncRun(active),message:"Repository sync is already running."};
- if(operation==="apply"){
-  const runs=(before?.workflow_runs||[]).filter((run:any)=>String(run?.status||"")==="completed").sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime());
-  const latestRun=runs[0];
-  if(latestRun?.id){
-   const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+latestRun.id);
-   if(details?.inputs)latestRun.inputs=details.inputs;
-  }
-  const preview=latestRun?.conclusion==="success"&&repositorySyncIsPreview(latestRun);
-  if(!preview)throw new Error("The latest completed sync run must be a successful, verified preview before Apply.");
+ const runs=await listRepositorySyncRuns(cfg.controlRepo);
+ const active=runs.find((run:any)=>activeRepositorySyncStatuses.has(String(run?.status||"").toLowerCase()));
+ if(active)throw new Error("Another repository sync is running. Wait until it finishes, then refresh status.");
+ if(data.operation==="apply"){
+  const latestPairRun=runs.find((run:any)=>{const meta=repositorySyncRunMeta(run);return meta.pair===pair&&meta.direction===direction;});
+  if(!latestPairRun||latestPairRun.status!=="completed"||latestPairRun.conclusion!=="success"||!repositorySyncRunMeta(latestPairRun).preview)
+   throw new Error("A successful latest Preview for this repository and direction is required before Apply.");
  }
  const startedAt=Date.now();
- await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main",inputs:{confirmation:"SYNC",preview:operation==="preview"?"true":"false"}})});
+ await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/dispatches",{
+  method:"POST",body:JSON.stringify({ref:"main",inputs:{confirmation:"SYNC",preview:data.operation==="preview"?"true":"false",pair,direction}})
+ });
  let run:any=null;
  for(let attempt=0;attempt<8&&!run;attempt++){
   await new Promise(resolve=>setTimeout(resolve,700));
-  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
-  run=(result?.workflow_runs||[]).filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=startedAt-5000).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+  const latest=await listRepositorySyncRuns(cfg.controlRepo);
+  run=latest.find((candidate:any)=>new Date(candidate.created_at||0).getTime()>=startedAt-5000&&repositorySyncRunMeta(candidate).pair===pair&&repositorySyncRunMeta(candidate).direction===direction)||null;
  }
- return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:(operation==="preview"?"Preview queued (no pushes): ":"Apply queued: ")+cfg.sourceOwner+" → "+cfg.targetOwner+"."};
+ const owners=repositorySyncOwners(direction);
+ return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:(data.operation==="preview"?"Preview queued (no pushes): ":"Apply queued: ")+pair+" · "+owners.sourceOwner+" → "+owners.targetOwner+"."};
 });
 type OperationsSystem="baseSource"|"engineSource"|"licenseManager"|"billingStore"|"devPanel";
 
